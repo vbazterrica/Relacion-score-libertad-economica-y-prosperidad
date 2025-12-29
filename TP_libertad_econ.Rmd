@@ -1,0 +1,3620 @@
+---
+title: "Indice de libertad económica"
+output: html_notebook
+---
+
+**Diplomatura Ciencia de Datos con r y python**
+**Verónica Bazterrica**
+#El objetivo del presente trabajo es analizar un dataset del score de libertad económica
+
+
+```{r}
+# Manipulación de datos y transformaciones
+library(tidyr)        # Para transformar datos, rellenar valores faltantes, etc.
+library(dplyr)        # Manipulación de datos (filter, select, mutate, etc.)
+library(tidyverse)    # Un conjunto de paquetes (incluye dplyr, tidyr, ggplot2, etc.)
+library(reshape2)     # Reshape de datos (derretir y acast)
+library(forcats)      # Manejo de variables de tipo factor
+library(purrr)        # Manipulación de listas y vectores de manera funcional
+library(psych)
+# Visualización
+library(ggplot2)      # Visualización básica en R (gráficos)
+library(corrplot)     # Gráficos de correlación
+library(plotly)       # Gráficos interactivos
+library(viridis)      # Paletas de colores para visualización
+library(paletteer)    # Acceso a muchas paletas de colores para visualización
+library(RColorBrewer)#Shiny interacivo)
+
+# Modelado y Machine Learning
+library(caret)        # Herramientas de machine learning
+library(randomForest) # Algoritmo de bosques aleatorios
+library(rpart)        # Árboles de decisión
+library(rpart.plot)   # Para graficar árboles de decisión
+library(e1071)         # Algoritmos de machine learning como SVM
+library(class)         # mplementa el algoritmo de clasificación K-Nearest Neighbors (KNN), utilizado para clasificación supervisada.
+
+# Interacción y reporte
+library(shiny)        # Para crear aplicaciones interactivas en R
+library(knitr)        # Para generar reportes en R Markdown
+library(kableExtra)   # Para mejorar las tablas en los reportes
+library(shinydashboard)    #Extensión de shiny para crear tableros de control interactivos con interfaces de usuario más complejas.
+library(collapsibleTree)   #Permite crear visualizaciones de árboles jerárquicos colapsables dentro de aplicaciones Shiny.
+library(shinycssloaders)      #grega animaciones de carga a las aplicaciones Shiny para mejorar la experiencia del usuario mientras esperan resultados.
+# Carga y manejo de datos
+library(httr)         # Para hacer peticiones HTTP y manejar APIs
+library(readtext)     # Para leer datos en diferentes formatos (texto, Excel, etc.)
+library(pdftools)     # Para convertir pdf
+#Otras librerias
+library(glmnet)   #mplementa modelos de regresión lineales y de regularización (como Lasso y Ridge) mediante la técnica de regularización L1/L2.
+library(Matrix)  #Proporciona clases y funciones para trabajar con matrices dispersas y otros tipos de estructuras matriciales eficientes en memoria.
+```
+
+
+#Los Datos están extraidos  de la fundación Heritage, indicador que se elabora anualmente teniendo en cuenta aproximadamente 1 año y medio atrás. 
+##Este indicador se compone de 12 variables que son ponderadas en forma diferente de acuerdo al valor  obtenido.
+#Cuanto más alto es este indicador de libertad(Overall Score) mayor es el bienestar económico de un país.
+
+**Se trabajarán los datos en primer lugar clusterizando y utilizando modelo de componentes principales para ver la importancia de las variables.**
+**Posteriormente se analizaran los cluster utilizandolos como target para validar su clasificación  a través de modelos de random forest y máquina de soporte vectorial.**
+
+
+**A continuación se incorporan más variables extraidas del banco mundial, como un promedio de 10 años de ingreso nacional en dolares, un promedio de la tasa de crecimiento de los países en los ultimos 10 años y algunos indicadores de la performance de la administracion de los países(como control de la corrupción, calidad institucional y voz y rendición de cuentas)**
+**Con estos datos se usararán para hacer una regresión lineal multiple diferenciada por cluster tomando  el ingreso per cápita como variable dependiente y los indicadores del  overall-Score como variables independientes  Posteriormente se harán algunas predicciones para analizar el  el comportamiento **
+
+#El dataset está en formato excel se descarga de la página web la fundación Heritage
+```{r}
+url <- "https://www.heritage.org/index/pages/all-country-scores"
+archivo_local <- tempfile(fileext = ".xlsx")
+GET(url, write_disk(archivo_local))
+
+
+# Leer el archivo Excel sin nonbres de columnas
+datos <- readxl::read_excel("2024_indexofeconomicfreedom_data.xlsx", col_names =FALSE)
+
+#Establecer la segunda fila como los nombres de la columnas
+colnames(datos) <- datos[2,] #Se usa la segunda fila como nombre de columnas
+#Limpiar las primeras dos filas (encabezados y datos no útiles)
+datos <- datos[-(1:2),]
+```
+
+#Se muestran los datos
+```{r}
+#vista prelimniar de los datos
+glimpse(datos)
+```
+#El dataset tiene 184 filas y 16 columnas. Todas se encuentran en formato caracter de modo tal que las columnas serán convertidas a numéricas.
+#Variables:
+#Overall Score: indicador de libertad económica
+#Property Rights = Derechos de propiedad
+#Government Integrity`= Integridad gubernamental para la efectividad de las politicas implementadas
+#Judicial Effectiveness: Efectividad o eficacia de la justicia
+#Tax Burden = Carga tributaria
+#Government Spending = Gasto público
+#Fiscal Health = Saneamiento de las cuentas públicas
+#Business Freedom = Libertad para emprender negocios
+#Labor Freedom = libertad de trabajo
+#Monetary Freedom = Libertad monetaria
+#Trade Freedom = Libertad de comercio
+#Investment Freedom = Libertad para invertir
+#Financial Freedom = Libertad financiera
+
+
+```{r}
+# Convertir los datos de las  columnas a los formatos numéricos
+datos_limpios <- datos %>%
+  dplyr::mutate(
+    Year = as.integer(Year),  
+    
+    # Convertir las columnas numéricas, primero se manejan los "N/A" con na_if
+    `Overall Score` = as.numeric(dplyr::na_if(`Overall Score`, "N/A")), 
+    `Property Rights` = as.numeric(dplyr::na_if(`Property Rights`, "N/A")),
+    `Government Integrity` = as.numeric(dplyr::na_if(`Government Integrity`, "N/A")),
+    `Judicial Effectiveness` = as.numeric(dplyr::na_if(`Judicial Effectiveness`, "N/A")),
+    `Tax Burden` = as.numeric(dplyr::na_if(`Tax Burden`, "N/A")),
+    `Government Spending` = as.numeric(dplyr::na_if(`Government Spending`, "N/A")),
+    `Fiscal Health` = as.numeric(dplyr::na_if(`Fiscal Health`, "N/A")),
+    `Business Freedom` = as.numeric(dplyr::na_if(`Business Freedom`, "N/A")),
+    `Labor Freedom` = as.numeric(dplyr::na_if(`Labor Freedom`, "N/A")),
+    `Monetary Freedom` = as.numeric(dplyr::na_if(`Monetary Freedom`, "N/A")),
+    `Trade Freedom` = as.numeric(dplyr::na_if(`Trade Freedom`, "N/A")),
+    `Investment Freedom` = as.numeric(dplyr::na_if(`Investment Freedom`, "N/A")),
+    `Financial Freedom` = as.numeric(dplyr::na_if(`Financial Freedom`, "N/A"))
+  )
+
+# Verificar el resultado con glimpse
+glimpse(datos_limpios)
+```
+#Detección de nulos
+```{r}
+#Deteccion de valores nulos 
+nulos_por_variable <- datos_limpios %>%
+  summarise_all(~ sum(is.na(.)))
+
+print(nulos_por_variable)
+```
+#Se decide eliminar los valores nulos por la inexistencia de los mismos para completar los datos en los indicadores debido a que no es posible completarlos o reemplazarlos por su media.
+```{r}
+#Datos limpios sin NA
+datos_limpios1 <- datos_limpios%>%
+  drop_na()
+#Verificar
+glimpse(datos_limpios1)
+
+#Comprobación
+nulos_por_variable <- datos_limpios1 %>%
+  summarise_all(~ sum(is.na(.)))
+
+print(nulos_por_variable)
+```
+
+#Convertir el dataset en un dataFrame
+```{r}
+#Convertir los datos de  tible a un data frame
+datos_limpios1_df <- as.data.frame(datos_limpios1)
+
+head(datos_limpios1_df)
+```
+
+#Se elimnarán las columnas Year y Region 
+```{r}
+# Eliminar la columna 'Year'
+datos_limpios1_df <- datos_limpios1_df %>%
+  select(-Year, -Region)
+
+# Verifica que la columna haya sido eliminada
+colnames(datos_limpios1_df)
+```
+
+#Vista del dataset
+```{r}
+str(datos_limpios1_df)
+```
+
+#Quedaron 14 columnas y 176 observaciones
+```{r}
+summary(datos_limpios1_df)
+```
+```{r}
+#convertir datos a una tabla
+library(DT)
+datatable <- datatable(datos_limpios1_df)
+datatable
+```
+```{r}
+summary(datos_limpios1_df)
+```
+
+===============================================================
+#================EDA======================
+
+```{r}
+# Distribución de Overall Score
+graf1 <- plot_ly(datos_limpios1_df, x = ~`Overall Score`, type = 'histogram', nbinsx = 30, marker = list(color = '#5cacc4', line = list(color = '#14888b', width = 2))) %>%
+  layout(title = "Distribución del Overall Score", 
+         xaxis = list(title = "Overall Score"),
+         yaxis = list(title = "Frecuencia"))
+
+graf1
+```
+
+```{r}
+#Grafico de frecuencia de las variables que integran el score
+# Definir las columnas de interés
+columnas <- c("Judicial Effectiveness", "Fiscal Health", "Monetary Freedom", 
+              "Financial Freedom", "Property Rights", "Tax Burden", 
+              "Business Freedom", "Trade Freedom", "Government Integrity", 
+              "Government Spending", "Labor Freedom", "Investment Freedom")
+
+# Crear gráfico
+graf2 <- datos_limpios1_df %>%
+  select(all_of(columnas)) %>%
+  gather(key = 'variable', value = 'valor') %>%
+  ggplot(aes(x = valor, fill = variable)) +
+  geom_histogram(bins = 30, color = "#d2fae2", alpha = 0.7) +  # Ajustamos la transparencia con alpha
+  facet_wrap(~ variable, scales = 'free', ncol = 3) +  # Ajuste de facetas
+  scale_fill_viridis_d() +  # Colores suaves con viridis
+  theme_minimal() + 
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),  # Tamaño y estilo de las etiquetas de las facetas
+    axis.text.x = element_text(angle = 45, hjust = 1),  # Rotación de las etiquetas del eje X
+    axis.text.y = element_text(size = 10),  # Tamaño de las etiquetas del eje Y
+    axis.title = element_text(size = 12, face = "bold"),  # Títulos más grandes
+    panel.grid = element_blank()  # Eliminar las líneas de la cuadrícula
+  ) + 
+  labs(
+    title = "Distribución de las Características",
+    x = "Valor de la Característica",
+    y = "Frecuencia"
+  )
+
+# Hacer gráfico interactivo con ggplotly
+ggplotly(graf2, tooltip = 'y') %>%
+  layout(
+    title = "Distribución de las Características",
+    #xaxis = list(title = "Valor de la Característica"),
+    yaxis = list(title = "Frecuencia"),
+    showlegend = FALSE  # Ocultar leyenda, si no es necesaria
+  )
+
+```
+
+
+
+#Detección de outliers
+```{r}
+#Boxplot del overall score
+graf3 <- plot_ly(datos_limpios1_df, y = ~`Overall Score`, type = 'box', 
+        boxmean = "sd",  # Esto incluye una línea para la media y el rango de la caja.
+        marker = list(color = '#5cacc4',  # Cambiar el color de los outliers
+                      line = list(color = 'black', width = 1))) %>%
+  layout(title = "Identificación de Outliers en Overall Score",
+         yaxis = list(title = "Overall Score"),
+         boxplot = list(marker = list(color = '#4eb3de')))
+graf3
+```
+#Los outliers en el overall score son valores del score muy bajos, es decir países cuyo bienestar de la población está muy por debajo de los valores medios
+
+```{r}
+#Grafico boxplot  de las variables que integran el score
+# Definir las columnas de interés
+columnas <- c("Judicial Effectiveness", "Fiscal Health", "Monetary Freedom", 
+              "Financial Freedom", "Property Rights", "Tax Burden", 
+              "Business Freedom", "Trade Freedom", "Government Integrity", 
+              "Government Spending", "Labor Freedom", "Investment Freedom")
+
+# Filtrar el dataframe solo con las columnas seleccionadas
+datos_boxplot <- datos_limpios1_df[, columnas]
+
+# Convertir los datos a formato largo (long format) para plotly
+datos_largos <- datos_boxplot %>%
+  pivot_longer(cols = everything(), 
+               names_to = "Variable", 
+               values_to = "Valor")
+
+# Crear el gráfico de cajas con un solo color
+
+
+graf4 <- plot_ly(data = datos_largos, 
+        x = ~Variable, 
+        y = ~Valor, 
+        type = 'box', 
+        boxmean = TRUE,  # Incluir la línea de la media
+        marker = list(color = '#5cacc4'),  
+        line = list(color = 'black')) %>%
+  layout(title = "Boxplot de Variables del Score",
+         yaxis = list(title = "Valor"),
+         xaxis = list(title = "Variables"),
+         boxmode = "group")  # Mostrar las cajas de forma agrupada
+
+ggplotly(graf4)
+```
+#Detección de outliers
+```{r}
+#Función para detectar outliers
+detect_outliers <- function(datos_limpios1_df) {
+  # Seleccionar las columnas numéricas
+  numeric_columns <- datos_limpios1_df[, sapply(datos_limpios1_df, is.numeric)]
+  
+  # Inicializar un vector para almacenar la cantidad de outliers por columna
+  outliers_count <- numeric(length(numeric_columns))
+  names(outliers_count) <- colnames(numeric_columns)
+  
+  # Iterar sobre cada columna numérica
+  for (col_name in colnames(numeric_columns)) {
+    # Obtener los valores de cada columna
+    column_data <- numeric_columns[[col_name]]
+    
+    # Calcular los cuartiles Q1 y Q3
+    Q1 <- quantile(column_data, 0.25)
+    Q3 <- quantile(column_data, 0.75)
+    
+    # Calcular el rango intercuartílico (IQR)
+    IQR_value <- IQR(column_data)
+    
+    # Calcular los límites inferior y superior para detectar outliers
+    lower_limit <- Q1 - 1.5 * IQR_value
+    upper_limit <- Q3 + 1.5 * IQR_value
+    
+    # Contar los outliers fuera de estos límites
+    outliers_count[col_name] <- sum(column_data < lower_limit | column_data > upper_limit)
+  }
+  
+  # Ordenar la cantidad de outliers en orden descendente
+  outliers_count_sorted <- sort(outliers_count, decreasing = TRUE)
+  
+  return(outliers_count_sorted)
+}
+
+# Impresión
+outliers <- detect_outliers(datos_limpios1_df)
+print(outliers)
+```
+```{r}
+# Crear un gráfico interactivo con plotly
+outliers_graph <- plot_ly(
+  x = names(outliers), 
+  y = outliers, 
+  type = 'bar',
+  name = 'Outliers',
+  marker = list(color = '#ef6771', line = list(color = '#c95c7a', width = 2))
+) %>%
+  layout(
+    title = 'Número de Outliers por Columna',
+    xaxis = list(title = 'Columnas'),
+    yaxis = list(title = 'Número de Outliers'),
+    showlegend = FALSE
+  )
+
+# Mostrar el gráfico
+outliers_graph
+```
+
+
+
+
+```{r}
+# Ordenar el número de outliers de manera ascendente y toma las 5 características con menos outliers
+caracteristicas_menos_outliers <- names(sort(outliers, decreasing = FALSE))[1:5]
+
+# Imprimir las 5 características con menos outliers
+print("Las 5 características con menos outliers son:")
+print(caracteristicas_menos_outliers)
+```
+
+```{r}
+# Ordenar el número de outliers de manera ascendente y toma las 5 características con menos outliers
+caracteristicas_menos_outliers <- names(sort(outliers, decreasing = TRUE))[1:5]
+
+# Imprimir las 5 características con menos outliers
+print("Las 5 características con más outliers son:")
+print(caracteristicas_menos_outliers)
+```
+
+```{r}
+# Calcular la matriz de correlación entre las variables relevantes
+correlation_matrix <- datos_limpios1_df %>%
+  select( "Overall Score" ,"Judicial Effectiveness", "Fiscal Health", "Monetary Freedom", 
+              "Financial Freedom", "Property Rights", "Tax Burden", 
+              "Business Freedom", "Trade Freedom", "Government Integrity", 
+              "Government Spending", "Labor Freedom", "Investment Freedom") %>%
+  cor(use = "complete.obs")  # Calcula la correlación de Pearson
+```
+
+
+
+```{r}
+# Convertir la matriz de correlación a formato largo para la visualización interactiva
+correlation_long <- as.data.frame(as.table(correlation_matrix))
+
+# Crear el gráfico interactivo con plotly
+graf_corr <- plot_ly(data = correlation_long, 
+        x = ~Var1, y = ~Var2, z = ~Freq, 
+        type = "heatmap", 
+        colors = "viridis",  # Cambiar la paleta de colores a viridis en minúsculas
+        colorbar = list(
+          title = "Correlación", 
+          tickvals = c(-1, 0, 1),
+          ticktext = c("-1", "0", "1"),
+          tickcolor = "black"
+        ),
+        hoverinfo = "text", 
+        # Mostrar las variables y su correlación en el hover
+        text = ~paste("Variables: ", Var1, " vs ", Var2, "<br>Correlación: ", round(Freq, 2))) %>%
+  layout(
+    title = "Matriz de Correlación Interactiva",
+    xaxis = list(
+      title = "Variables", 
+      tickangle = 45,  # Rotación de las etiquetas del eje X a 45° para facilitar la visualización
+      tickmode = "array",  # Asegurarse de que se muestren todas las variables
+      showticklabels = TRUE,
+      tickfont = list(size = 8, family = "Arial", weight = "bold"),  # Negrita y tamaño de las etiquetas X
+      tickvals = correlation_long$Var1  # Asegurarse de que todas las etiquetas se muestren
+    ),
+    yaxis = list(
+      title = "Variables",
+      tickangle = 0,  # Mantener las etiquetas del eje Y sin rotar
+      showticklabels = TRUE,
+      tickfont = list(size = 8, family = "Arial", weight = "bold")  # Negrita y tamaño de las etiquetas Y
+    ),
+    showlegend = FALSE,  # Ocultar la leyenda
+    width = 700,  # Ajustar el tamaño del gráfico
+    height = 550,  # Ajustar el tamaño del gráfico
+    margin = list(t = 80, b = 150, l = 100, r = 100),  # Ajuste de márgenes
+    xaxis = list(showgrid = TRUE),  # Activar líneas de cuadrícula en el eje X
+    yaxis = list(showgrid = TRUE)   # Activar líneas de cuadrícula en el eje Y
+  )
+graf_corr
+
+```
+
+#Filtrar variables con menos correlacion
+```{r}
+# Convertir la matriz de correlación a formato largo
+correlation_long <- melt(correlation_matrix)
+
+# Filtrar las correlaciones entre diferentes variables (no consigo misma)
+correlation_long <- correlation_long[correlation_long$Var1 != correlation_long$Var2, ]
+
+# Filtrar las correlaciones menores a 0.1 (ajusta este valor según lo que necesites)
+low_correlation <- correlation_long[abs(correlation_long$value) < 0.1, ]
+
+# Ordenar por la correlación más baja
+low_correlation_sorted <- low_correlation[order(abs(low_correlation$value)), ]
+
+# Imprimir las primeras 5 correlaciones más bajas
+head(low_correlation_sorted, 5)
+```
+#Filtrar variables con más correlación
+```{r}
+# Convertir la matriz de correlación a formato largo
+correlation_long <- melt(correlation_matrix)
+
+# Filtrar las correlaciones entre diferentes variables (no consigo misma)
+correlation_long <- correlation_long[correlation_long$Var1 != correlation_long$Var2, ]
+
+# Filtrar las correlaciones mayores a 0.8 (ajusta este valor según lo que necesites)
+alta_correlation <- correlation_long[abs(correlation_long$value) > 0.8, ]
+
+# Ordenar por la correlación más alta a la más baja
+alta_correlation_sorted <- alta_correlation[order(-abs(alta_correlation$value)), ]
+
+# Imprimir las primeras 5 correlaciones más altas
+head(alta_correlation_sorted, 8)
+```
+
+#Top ten Paises con  score más alto y más bajo
+```{r}
+# Ordenar los países por Overall Score (de mayor a menor)
+mejor_peor_score <- datos_limpios1 %>%
+  arrange(desc(`Overall Score`)) %>%
+  select(Country, `Overall Score`)
+
+# Ver los 10 países con el mejor score
+#top_10_mejor_score <- head(mejor_peor_score, 10)
+#top_10_mejor_score
+
+# Ver los 10 países con el peor score
+#bottom_10_peor_score <- tail(mejor_peor_score, 10)
+#bottom_10_peor_score
+
+
+```
+
+
+#tabla
+```{r}
+# Ordenar los países por Overall Score (de mayor a menor)
+mejor_peor_score <- datos_limpios1_df %>%
+  arrange(desc(`Overall Score`)) %>%
+  select(Country, `Overall Score`)
+
+# Ver los 10 países con el mejor score
+top_10_mejor_score <- head(mejor_peor_score, 10)
+
+# Ver los 10 países con el peor score
+bottom_10_peor_score <- tail(mejor_peor_score, 10)
+
+# Mostrar los resultados en una tabla ordenada
+kable(top_10_mejor_score, caption = "Top 10 Países con Mejor Puntaje") %>%
+  kable_styling("striped", full_width = F)
+
+kable(bottom_10_peor_score, caption = "Top 10 Países con Peor Puntaje") %>%
+  kable_styling("striped", full_width = F)
+```
+
+
+
+
+
+```{r}
+# Ordenar los top 10 países con el mejor score de mayor a menor
+top_10_mejor_score <- top_10_mejor_score %>%
+  arrange(desc(`Overall Score`))
+
+# Ordenar los top 10 países con el peor score de menor a mayor
+bottom_10_peor_score <- bottom_10_peor_score %>%
+  arrange(`Overall Score`)
+
+# Asegurarnos de que las barras se ordenen correctamente en el gráfico
+top_10_mejor_score$Country <- factor(top_10_mejor_score$Country, levels = top_10_mejor_score$Country)
+bottom_10_peor_score$Country <- factor(bottom_10_peor_score$Country, levels = bottom_10_peor_score$Country)
+
+# Crear el gráfico para los top 10 países con el mejor score (de mayor a menor)
+grafico_mejor_score <- plot_ly(data = top_10_mejor_score, 
+                               x = ~Country, y = ~`Overall Score`, 
+                               type = 'bar', 
+                               marker = list(color = '#ef6771'),  
+                               text = ~paste('Score: ', `Overall Score`),  # Mostrar el score en el hover
+                               hoverinfo = 'text') %>%
+  layout(
+    title = 'Top 10 Países con Mejor Score',
+    xaxis = list(title = 'Países', tickangle = 45),
+    yaxis = list(title = 'Overall Score'),
+    showlegend = FALSE
+  )
+
+
+# Mostrar ambos gráficos
+grafico_mejor_score
+
+```
+
+
+```{r}
+# Crear el gráfico para los bottom 10 países con el peor score (de menor a mayor)
+grafico_peor_score <- plot_ly(data = bottom_10_peor_score, 
+                               x = ~Country, y = ~`Overall Score`, 
+                               type = 'bar', 
+                               marker = list(color = '#5cacc4'),  
+                               text = ~paste('Score: ', `Overall Score`),  # Mostrar el score en el hover
+                               hoverinfo = 'text') %>%
+  layout(
+    title = 'Grafico Países con Peor Score',
+    xaxis = list(title = 'Países', tickangle = 45),
+    yaxis = list(title = 'Overall Score'),
+    showlegend = FALSE
+  )
+grafico_peor_score
+
+```
+
+
+```{r}
+# Relación entre Business Freedom y Overall Score
+graf5<- plot_ly(datos_limpios1_df, x = ~`Business Freedom`, y = ~`Overall Score`, type = 'scatter', mode = 'markers',marker = list(color = '#ef6771', line = list(color = '#c95c7a', width = 2)) ) %>%
+  layout(title = "Relación entre Business Freedom y Overall Score",
+         xaxis = list(title = "Business Freedom"),
+         yaxis = list(title = "Overall Score"))
+
+ggplotly(graf5)
+```
+
+#El overall score tiene una relación positiva con Business Freedom(libertad de negocio)
+
+```{r}
+# Gráfico de dispersión interactivo
+grafico_dispersion1 <- plot_ly(datos_limpios1_df, x = ~`Government Integrity`, y = ~`Overall Score`,
+                              type = "scatter", mode = "markers", 
+                              marker = list(color = '#ef6771', line = list(color = '#c95c7a', 
+                                                                           width = 2))) %>%
+  layout(title = "Relación entre el overall score e integridad gubernamental",
+         xaxis = list(title = "Government Integrity"),
+         yaxis = list(title = "Overall Score"))
+
+# Mostrar el gráfico
+grafico_dispersion1
+```
+
+```{r}
+# Gráfico de dispersión interactivo
+grafico_dispersion2 <- plot_ly(datos_limpios1_df, x = ~`Judicial Effectiveness`, y = ~`Overall Score`,
+                              type = "scatter", mode = "markers", 
+                              marker = list(color = '#ef6771', line = list(color = '#c95c7a', 
+                                                                           width = 2))) %>%
+  layout(title = "Relación entre el overall score y la Efectividad de la Justicia",
+         xaxis = list(title = "Judicial Effectiveness"),
+         yaxis = list(title = "Overall Score"))
+
+# Mostrar el gráfico
+grafico_dispersion2
+```
+```{r}
+# Gráfico de dispersión interactivo
+grafico_dispersion3 <- plot_ly(datos_limpios1_df, x = ~`Government Spending`, y = ~`Overall Score`,
+                              type = "scatter", mode = "markers", 
+                              marker = list(color = '#ef6771', line = list(color = '#c95c7a', 
+                                                                           width = 2))) %>%
+  layout(title = "Relación entre el overall score y el nivel de gasto público",
+         xaxis = list(title = "Government Spending"),
+         yaxis = list(title = "Overall Score"))
+
+# Mostrar el gráfico
+grafico_dispersion3
+```
+
+#========================================================================
+
+#Se probará clusterizar los paises en función de los indicadores que integran su score que una visión más detallada de los factores que componen la libertad económica en cada país.Esto te dará una visión más rica y precisa sobre qué factores específicos están impulsando las diferencias entre países.
+```{r}
+# Selección de las columnas relevantes
+datos_clustering <- datos_limpios1_df %>%
+  select(`Property Rights`, `Government Integrity`, `Judicial Effectiveness`, 
+         `Tax Burden`, `Government Spending`, `Fiscal Health`, 
+         `Business Freedom`, `Labor Freedom`, `Monetary Freedom`, 
+         `Trade Freedom`, `Investment Freedom`, `Financial Freedom`)
+
+
+
+```
+
+#Primero se hace PCA (al hacerlo da error)
+```{r}
+#Incio pca
+pca <- prcomp(datos_clustering, scale. = TRUE)
+# Tomar las primeras dos componentes principales (por ejemplo)
+pca_datos <- pca$x[, 1:2]
+
+
+```
+
+
+#Uso de k-means
+```{r}
+#Uso k-means
+set.seed(123) # Para reproducibilidad
+kmeans_result <- kmeans(datos_clustering, centers = 3) 
+
+# Ver los resultados
+kmeans_result$cluster
+```
+#Función codo
+```{r}
+# Método del codo para determinar el número óptimo de clústeres
+set.seed(123)  # Para reproducibilidad
+
+# Calcular la suma de los errores cuadráticos (inercia) para diferentes números de clústeres
+inercia <- sapply(1:10, function(k) {
+  kmeans(datos_clustering, centers = k, nstart = 25)$tot.withinss
+})
+
+# Crear el gráfico con ggplot2 y personalizar colores
+gg <- ggplot(data.frame(K = 1:10, Inercia = inercia), aes(x = K, y = Inercia)) +
+  geom_line(color = "#7db8a2", size = 1.2) +  # Línea de color azul
+  geom_point(color = "#ef6771", size = 4) +    # Puntos de color naranja
+  labs(title = "Método del Codo para Determinar el Número de Clústeres",
+       x = "Número de Clústeres",
+       y = "Inercia") +
+  theme_minimal() +                           # Estilo minimalista
+  theme(plot.title = element_text(hjust = 0.5))  # Centrar el título
+
+# Convertir el gráfico ggplot en interactivo con plotly
+codo_interactivo <- ggplotly(gg)
+
+# Mostrar el gráfico interactivo
+codo_interactivo
+
+```
+
+#El método del codo sugiere no más de dos clusters se probó con tres pero no quedaba bien clasificado
+```{r}
+# Realizar el clustering K-means con el número de clústeres seleccionado 
+k <- 2  
+
+set.seed(123)  # Para reproducibilidad
+modelo_kmeans <- kmeans(datos_clustering, centers = k, nstart = 25)
+
+# Ver los resultados
+modelo_kmeans$cluster  # Asignación de clústeres a cada observación
+modelo_kmeans$centers  # Centroides de los clústeres
+```
+```{r}
+# Continuar PCA
+pca_resultado <- prcomp(datos_clustering, center = TRUE, scale. = TRUE)
+
+# Resumen del PCA para ver la varianza explicada por cada componente
+summary(pca_resultado)
+```
+
+#PC1 tiene una desviación estándar de 2.5017, lo que indica que es el componente que captura la mayor variabilidad en los datos.
+#PC2 tiene una desviación estándar de 1.3129, lo que también es relativamente alto, pero no tanto como PC1. Esto sugiere que PC2 también captura una parte importante de la variabilidad, pero no tanta como PC1.Los componentes posteriores tienen desviaciones estándar más pequeñas, lo que significa que explican menos variabilidad.
+
+#PC1 explica 52.15% de la variabilidad en los datos, lo que es una cantidad significativa. Esto significa que la mayoría de la información en los datos está capturada por este primer componente.
+#PC2 explica 14.36% de la variabilidad. Aunque es mucho menos que PC1, sigue siendo importante.
+#PC3 explica 7.77%, lo que indica que contribuye de manera menor pero significativa.
+#Los componentes a partir de PC4 empiezan a explicar menos varianza, lo que sugiere que la información adicional que proporcionan es más pequeña y menos relevante.
+
+#Con PC1 y PC2 juntos, se explica 66.52% de la variabilidad total, lo que es una cantidad bastante significativa. Esto sugiere que, con solo dos componentes, ya se están capturando una parte considerable de la variabilidad.
+#Con PC1, PC2, y PC3, se explican el  74.29% de la varianza, lo que sigue siendo bastante bueno.
+    .
+#Decide quedarme con dos component
+
+```{r}
+
+
+# Continuar con PCA
+pca_resultado <- prcomp(datos_clustering, center = TRUE, scale. = TRUE)
+
+# Obtener la proporción de varianza y la varianza acumulada
+varianza_explicada <- summary(pca_resultado)$importance[2, ]  # Proporción de varianza
+varianza_acumulada <- summary(pca_resultado)$importance[3, ]  # Varianza acumulada
+
+# Crear el gráfico de barras para la varianza explicada
+grafico_varianza <- plot_ly(
+  x = 1:length(varianza_explicada),  # Componentes principales
+  y = varianza_explicada,  # Proporción de varianza explicada
+  type = 'bar',
+  name = 'Varianza explicada',
+  marker = list(color = "#7db8a2")
+)
+
+# Agregar la varianza acumulada en el mismo gráfico
+grafico_varianza <- grafico_varianza %>%
+  add_trace(
+    x = 1:length(varianza_acumulada),
+    y = varianza_acumulada,
+    type = 'scatter',
+    mode = 'lines+markers',
+    name = 'Varianza acumulada',
+    line = list(color = '#ef6771', shape = 'linear'),
+    marker = list(color = '#ef6771')
+  )
+
+# Personalizar el gráfico
+grafico_varianza <- grafico_varianza %>%
+  layout(
+    title = "Explicación de la Varianza por Componentes Principales",
+    xaxis = list(
+      title = "Componentes Principales",
+      tickmode = "linear",
+      dtick = 1
+    ),
+    yaxis = list(
+      title = "Proporción de Varianza",
+      rangemode = "tozero"
+    ),
+    barmode = 'group'
+  )
+
+# Mostrar el gráfico
+grafico_varianza
+
+```
+
+
+#Se agregan el análisis PCA a los clusteres 
+
+```{r}
+# Agregar los clústeres a los datos originales
+datos_clustering$Cluster <-as.factor(modelo_kmeans$cluster)
+
+datos_clustering %>%
+  group_by(Cluster) %>%
+  summarise(across(everything(), mean))
+
+```
+
+
+
+
+```{r}
+
+# Crear un dataframe con los dos primeros componentes principales
+pca_df <- data.frame(pca$x[, 1:2])
+pca_df$Cluster <- factor(modelo_kmeans$cluster)
+
+# Asignar colores a los clústeres (opcional)
+pca_df$Cluster <- as.factor(pca_df$Cluster)
+```
+
+
+```{r}
+datatable(pca_df)
+```
+
+
+  
+```{r}
+cluster1 <- plot_ly(pca_df, 
+               x = ~PC1, 
+               y = ~PC2, 
+               type = 'scatter', 
+               mode = 'markers', 
+               color = ~Cluster, 
+               text = ~paste("Cluster: ", Cluster),  # Texto emergente
+               hoverinfo = 'text',  # Mostrar el texto cuando pasas el cursor
+               colors = RColorBrewer::brewer.pal(3, "Set1"),
+               marker = list(size = 8, opacity = 0.6, line = list(width = 1, color = 'rgb(40, 40, 40)'))) %>%
+  layout(title = "Clustering K-means usando PCA",
+         xaxis = list(title = "Componente Principal 1"),
+         yaxis = list(title = "Componente Principal 2"),
+         showlegend = TRUE)
+
+cluster1
+```
+
+
+ 
+
+```{r}
+#Se incorporan los países a los clusteres del dataset que lo contiene
+pca_df$Country <- datos_limpios1_df$Country
+
+# Verificar si la columna se ha agregado correctamente
+head(pca_df)
+```
+```{r}
+datatable(pca_df)
+```
+
+
+#Gráfico de clusters y países que lo integran
+
+```{r}
+# Crear el gráfico interactivo con Plotly incorporandolos paises
+fig_cluster_pais <- plot_ly(pca_df, 
+               x = ~PC1, 
+               y = ~PC2, 
+               type = 'scatter', 
+               mode = 'markers', 
+               color = ~Cluster, 
+               colors = RColorBrewer::brewer.pal(length(unique(pca_df$Cluster)), "Set1"),  # Paleta de colores
+               text = ~paste("Country: ", Country, "<br>Cluster: ", Cluster),  # Agregar país y clúster al texto emergente
+               hoverinfo = 'text',  # Mostrar información cuando se pase el mouse
+               marker = list(size = 10, opacity = 0.6, line = list(width = 1, color = 'rgb(40, 40, 40)'))) %>%
+  layout(title = "Clustering K-means usando PCA y paises",
+         xaxis = list(title = "Componente Principal 1"),
+         yaxis = list(title = "Componente Principal 2"),
+         showlegend = TRUE)
+
+# Mostrar el gráfico
+fig_cluster_pais
+```
+#En el cluster 1 se encuentran países con score medio/alto, es decir con calidad de economía y de vida medios/altos y en el cluster 2 aquellos con peores score y niveles de situación económica medio/bajas
+
+# Ver el porcentaje de varianza explicada por cada componente
+```{r}
+# Ver el porcentaje de varianza explicada por cada componente
+summary(pca_df)
+```
+
+
+
+
+
+```{r}
+# Extraer las proyecciones de las observaciones en los primeros dos componentes principales
+pca_data <- as.data.frame(pca$x[, 1:2])  # Primeros dos componentes (PC1 y PC2)
+
+# Agregar la columna de países (u otra variable relevante para etiquetas)
+pca_data$Country <- datos_limpios1_df$Country  
+
+# Extraer las cargas de las variables en los primeros dos componentes principales
+cargas <- pca$rotation[, 1:2]  # Cargas para los primeros dos componentes principales
+cargas <- as.data.frame(cargas)
+cargas$Variable <- rownames(cargas)  # Añadir los nombres de las variables
+```
+
+
+```{r}
+# Ver las cargas para los primeros 2 componentes
+ 
+num_componentes <- 2  
+
+# Extraer las primeras 'num_componentes' componentes
+pca_reducido <- pca_df$x[, 1:num_componentes]
+
+
+```
+#Se cargan las componentes
+
+```{r}
+# Ver las cargas para los primeros 2 componentes
+cargas_2_componentes <- cargas[, 1:2]
+print(cargas_2_componentes)
+```
+
+
+    .
+#Gráfico de como explican las componenentes
+
+
+```{r}
+# Convertir las cargas en un data frame
+cargas_2_componentes_df <- data.frame(
+  variable = rownames(cargas_2_componentes),
+  PC1 = cargas_2_componentes[, 1],
+  PC2 = cargas_2_componentes[, 2]
+)
+
+# Crear un gráfico de barras interactivo
+fig_loadings <- plot_ly(cargas_2_componentes_df, 
+                        x = ~variable, 
+                        y = ~PC1, 
+                        type = 'bar', 
+                        name = 'Componente Principal 1',
+                        marker = list(color = '#d6496c')) %>%
+  add_trace(y = ~PC2, 
+            name = 'Componente Principal 2', 
+            marker = list(color = '#7db8a2')) %>%
+  layout(
+    title = 'Cargas de las Variables en los Componentes Principales',
+    xaxis = list(title = 'Variables', tickangle = 45),
+    yaxis = list(title = 'Carga'),
+    barmode = 'group',
+    hovermode = 'closest',
+    showlegend = TRUE,
+    margin = list(b = 150)
+  )
+
+# Mostrar el gráfico
+fig_loadings
+```
+
+#Interpretación de las cargas en PC1 y PC2
+
+#PC1 (Componente Principal 1):     Relacionado principalmente con la gobernanza y la libertad económica. Los países con bajos derechos de propiedad, integridad del gobierno, y libertad empresarial tienen valores altos en PC1. Mayor carga impositiva y mayor gasto público está asociado a valores bajos en PC1.
+
+#PC2 (Componente Principal 2): Relacionado con la intervención económica y las libertades económicas. Los países con menores cargas impositivas, mejor performance de  gasto público, y mayor salud fiscal tienden a tener valores altos en PC2.     Los países con bajos derechos de propiedad, baja integridad gubernamental, y baja efectividad judicial tienen valores bajos en PC2. 
+
+
+
+```{r}
+table(datos_clustering$Cluster)
+```
+
+```{r}
+# Contar la frecuencia de países por cada cluster
+table(datos_clustering$Cluster)
+tabla_cluster <- table(datos_clustering$Cluster)
+
+# Crear una tabla con kable
+kable(tabla_cluster, caption = "Cantidad de países por Cluster", col.names = c("Cluster", "Cantidad")) %>%
+  kable_styling("striped", full_width = FALSE) %>%
+  column_spec(1, width = "10em")  # Ajusta el ancho de las columnas
+```
+
+
+
+
+```{r}
+
+#Gráfico de porcentaje de paises por cluster
+porcentaje_cluster <-datos_clustering%>%
+  group_by(Cluster)%>%
+  count()%>%
+  ungroup()%>%
+  mutate(porcentaje = n/sum(n)*100)
+porcentaje_cluster
+
+# Crear una lista de colores alternados
+colors_alternados <- rep(c('#14888b', '#e15e6e'), length.out = nrow(porcentaje_cluster))
+
+# Crear el gráfico facetado
+fig_cluster_num <- porcentaje_cluster %>%
+  plot_ly(
+    x = ~Cluster,                  # Eje X: Clúster
+    y = ~porcentaje,               # Eje Y: Porcentaje
+    type = 'bar',                  # Tipo de gráfico: barras
+    text = ~paste0(round(porcentaje, 2), "%"), # Mostrar los porcentajes como texto
+    textposition = 'inside',        # Posicionar el texto dentro de las barras
+    marker = list(color = colors_alternados)  # Colorear las barras de forma alternada
+  ) %>%
+  layout(
+    title = "Distribución de Porcentajes por Cluster",
+    xaxis = list(title = "Cluster"),
+    yaxis = list(title = "Porcentaje", ticksuffix = "%"),
+    showlegend = FALSE,
+    barmode = "stack",  # Apilamiento de barras
+    facet_col = ~Cluster  # Facetado en columnas, basado en la columna 'Cluster'
+  )
+# Mostrar el gráfico
+fig_cluster_num
+```
+
+
+```{r}
+#Limpieza previa de los datos para continuar
+names(datos_clustering) <- gsub(" ", "_", names(datos_clustering)) 
+# Limpiar caracteres especiales (por ejemplo, comillas, puntos, etc.)
+names(datos_clustering) <- gsub("[^[:alnum:]_]", "", names(datos_clustering<- as.data.frame(datos_clustering)
+))
+```
+
+
+#Se tomara como target el cluster creado y se evaluaran  un modelo de random forest y de maquina de soporte vectorial  para ver que modelo predice mejor la clasificación.
+
+#===================Random forest==================
+#A la columna cluster se la tomará como target 
+```{r}
+#RANDOM FOREST TOTAL VARIABLES
+# Particionar los datos en conjuntos de entrenamiento y prueba
+set.seed(42)
+seleccion1 <- sample(x = 1:nrow(datos_clustering), nrow(datos_clustering) * 0.7, replace = FALSE)
+training1 <- datos_clustering[seleccion1, ]
+testing1 <- datos_clustering[-seleccion1, ]
+
+# Crear modelo random forest
+rf_model1 <- randomForest(Cluster ~ ., data = training1)
+
+
+# Visualizar el resumen del modelo
+print(rf_model1)
+```
+```{r}
+predictions1 <- predict(rf_model1, newdata = testing1)
+confusion1<-   confusionMatrix(predictions1, testing1$Cluster)
+print(confusion1)
+```
+
+```{r}
+# Nota: Random Forest tiene múltiples árboles, por lo que se elige el  primero aquí.
+single_tree <- getTree(rf_model1, k = 1, labelVar = TRUE)
+
+# Crear un modelo de árbol de decisión con rpart para graficar
+library(rpart)
+tree_model1 <- rpart(Cluster ~ ., data = training1, method = "class")
+
+# Graficar el árbol
+rpart.plot(tree_model1, main = "Árbol de Decisión del Random Forest")
+```
+
+#Datos que necesitan para luego comparar modelos
+```{r}
+#Evaluacion del modelo:
+confusion_matrix1 <- table(predictions1, testing1$Cluster)
+print(confusion_matrix1)
+
+#Calculamos la precision del modelo:
+accuracy_rf_total <- (sum(diag(confusion_matrix1)) / sum(confusion_matrix1)) * 100
+print(paste("Accuracy: ", round(accuracy_rf_total, 2), "%"))
+
+#CÁLCULO DEL KAPPA
+
+# Calcular la matriz de confusión
+confusion1 <- confusionMatrix(predictions1, testing1$Cluster)
+
+# Verificar la estructura del objeto de la matriz de confusión
+str(confusion1)
+
+# Extraer el valor de Kappa
+kappa_rf_total <- confusion1$overall['Kappa']
+
+# Mostrar Kappa
+print(paste("Kappa:", kappa_rf_total*100))
+```
+```{r}
+# Calculando la matriz de confusión
+confusion1 <- confusionMatrix(predictions1, testing1$Cluster)
+
+# Verificar la estructura del objeto confusion1
+str(confusion1)
+
+# Imprimir la tabla de confusión
+print(confusion1$table)
+
+# Mostrar el valor de Kappa y la precisión
+kappa_rf_total <- confusion1$overall['Kappa']
+accuracy_rf_total <- confusion1$overall['Accuracy']
+
+print(paste("Kappa:", round(kappa_rf_total*100, 2), "%"))
+print(paste("Accuracy:", round(accuracy_rf_total*100, 2), "%"))
+
+
+```
+```{r}
+# Convertir la matriz de confusión en un dataframe
+confusion1_df <- as.data.frame(as.table(confusion1$table))
+
+# Verificar que la conversión fue exitosa
+print(confusion1_df)
+
+```
+```{r}
+# Crear el gráfico de la matriz de confusión con ggplot2
+grafico_confusion_rf <- ggplot(data = confusion1_df, aes(x = Reference, y = Prediction, fill = Freq)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "#5cacc4", high = "#9467bd") +
+  geom_text(aes(label = Freq), color = "black", vjust = 1) +
+  labs(title = paste("Matriz de Confusión para RF\nAccuracy:", round(accuracy_rf_total * 100, 2), "%"),
+       x = "Actual",
+       y = "Predicted") +
+  theme_minimal()
+
+# Convertir el gráfico a interactivo con plotly
+grafico_interactivo_rf <- ggplotly(grafico_confusion_rf)
+
+# Mostrar el gráfico interactivo
+grafico_interactivo_rf
+
+```
+
+```{r}
+#Gráfico interactivo de matriz
+confusion1 <- as.data.frame(confusion1$table)
+colnames(confusion1) <- c("Prediction", "Reference", "Frequency")
+
+
+graf_matriz_rf <- ggplot(data = confusion1, aes(x = Reference, y = Prediction, fill = Frequency)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "#5cacc4", high = "#9467bd") +
+  geom_text(aes(label = Frequency), color = "black", vjust = 1) +
+  labs(title = paste("Matriz de Confusion para RF sobre todas las variables \nAccuracy: ", round(accuracy_rf_total, 2), "%"),
+       x = "Actual",
+       y = "Predicted") +
+  theme_minimal()
+
+ggplotly(graf_matriz_rf)
+```
+
+```{r}
+#Obtener la importancia de las variables del modelo Random Forest:
+importance <- importance(rf_model1)
+importance_df <- data.frame(variable = rownames(importance), Importance = importance [,1])
+
+#Ordenar las variables por importancia de forma descendente:
+importance_df <- importance_df[order(-importance_df$Importance),] #el simbolo - de delante de importance, es porque quiero que me las ordene de manera descendente
+
+#Mostrar las 5 mejores variables:
+top_variables <- head(importance_df, 5)
+print(top_variables)
+```
+```{r}
+# Crear gráfico interactivo con plotly
+colors <- c("#8de0a6", "#FEE08B", "#FDAE61", "#f27c7c", "#de528c")
+graf_importancia <- plot_ly(top_variables, x = ~variable, y = ~Importance, type = 'bar',textposition = 'auto',
+                            marker = list(color = colors)) %>%
+  layout(title = 'Importancia de las Variables',
+         xaxis = list(title = 'Variables',categoryorder = 'total descending'),
+         yaxis = list(title = 'Importancia')
+         )
+
+graf_importancia
+```
+
+```{r}
+# Entrenar un modelo de bosques aleatorios para determinar la importancia de las características
+modelo_rf <- randomForest(Cluster ~ ., data = datos_clustering)
+
+# Mostrar la importancia de las características
+importancia_caracteristicas <- importance(modelo_rf)
+print(importancia_caracteristicas)
+
+# Seleccionar las características más importantes (por ejemplo, las 5 más importantes)
+caracteristicas_importantes <- rownames(importancia_caracteristicas)[order(importancia_caracteristicas, decreasing = TRUE)][1:5]
+
+# Imprimir las características más importantes
+print("Las 5 características más importantes son:")
+print(caracteristicas_importantes)
+
+# Crear un nuevo conjunto de datos solo con las características seleccionadas
+datos_seleccionados <- datos_clustering[, c(caracteristicas_importantes, "Cluster")]
+
+datos_seleccionados
+```
+
+```{r}
+#RANDOM FOREST CON VARIABLES SELECCIONADAS
+
+# Particionamos los datos en conjuntos de entrenamiento y prueba
+set.seed(42)
+seleccion2 <- sample(x = 1:nrow(datos_seleccionados), nrow(datos_clustering) * 0.7, replace = FALSE)
+training2 <- datos_seleccionados[seleccion2, ]
+testing2 <- datos_seleccionados[-seleccion2, ]
+
+# Crear modelo random forest
+rf_model2 <- randomForest(Cluster ~ ., data = training2)
+
+# Visualizar el resumen del modelo
+print(rf_model2)
+```
+
+```{r}
+predictions2 <- predict(rf_model2, newdata = testing2)
+confusion2<-   confusionMatrix(predictions2, testing2$Cluster)
+print(confusion2)
+```
+```{r}
+# Extraer el primer árbol del modelo Random Forest
+# Nota: Random Forest tiene múltiples árboles, por lo que se elige el  primero aquí.
+single_tree2 <- getTree(rf_model2, k = 1, labelVar = TRUE)
+
+# Crear un modelo de árbol de decisión con rpart para graficar
+
+tree_model_selec2 <- rpart(Cluster ~ ., data = training2, method = "class")
+
+# Graficar el árbol
+rpart.plot(tree_model_selec2, main = "Árbol de Decisión del Random Forest")
+```
+```{r}
+#Evaluacion del modelo selección:
+confusion_matrix2 <- table(predictions2, testing2$Cluster)
+print(confusion_matrix2)
+
+#Calculamos la precision del modelo:
+accuracy_rf_selec <- (sum(diag(confusion_matrix2)) / sum(confusion_matrix2)) * 100
+print(paste("Accuracy: ", round(accuracy_rf_selec, 2), "%"))
+
+# Calcular la matriz de confusión
+confusion2 <- confusionMatrix(predictions2, testing2$Cluster)
+
+# Verificar la estructura del objeto de la matriz de confusión
+str(confusion2)
+
+# Extraer el valor de Kappa
+kappa_rf_selec <- confusion2$overall['Kappa']
+
+# Mostrar Kappa
+print(paste("Kappa:", kappa_rf_selec*100))
+```
+
+```{r}
+#Gráfico interactivo de matriz
+
+
+confusion_df <- as.data.frame(confusion2$table)
+colnames(confusion_df) <- c("Prediction", "Reference", "Frequency")
+
+
+graf_matriz_rf2 <- ggplot(data = confusion_df, aes(x = Reference, y = Prediction, fill = Frequency)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "#5cacc4", high = "#9467bd") +
+  geom_text(aes(label = Frequency), color = "black", vjust = 1) +
+  labs(title = paste("Matriz de Confusión para RF sobre variables seleccionadas \nAccuracy: ", round(accuracy_rf_selec, 2), "%"),
+       x = "Actual",
+       y = "Predicted") +
+  theme_minimal()
+
+ggplotly(graf_matriz_rf2)
+```
+
+#Se balanceará el modelo
+
+```{r}
+
+#Se balanceará el modelo
+# Verificar la cantidad de observaciones en cada cluster
+print(table(datos_clustering$Cluster))  
+
+# Identificar los índices de cada clase
+indice_1 <- which(datos_clustering$Cluster == 1)  
+indice_2 <- which(datos_clustering$Cluster == 2)
+
+# Verificar que ambas clases tengan elementos
+if (length(indice_1) == 0) {
+  stop("Cluster 1 no tiene observaciones")
+}
+if (length(indice_2) == 0) {
+  stop("Cluster 2 no tiene observaciones")
+}
+
+# Determinar cuál es la clase minoritaria y la mayoritaria
+cat("Tamaño de Cluster 1:", length(indice_1), "\n")
+cat("Tamaño de Cluster 2:", length(indice_2), "\n")
+
+if (length(indice_1) < length(indice_2)) {
+  # Si "Cluster 1" es menor, balanceamos "Cluster 2"
+  indices_balanceados_cluster_2 <- sample(indice_2, length(indice_1), replace = FALSE)
+  indices_balanceados <- c(indice_1, indices_balanceados_cluster_2)
+} else {
+  # Si "Cluster 2" es menor, se balancea "Cluster 1"
+  indices_balanceados_cluster_1 <- sample(indice_1, length(indice_2), replace = FALSE)
+  indices_balanceados <- c(indice_2, indices_balanceados_cluster_1)
+}
+
+# Crear los datos balanceados
+datos_balanceados_clustering <- datos_clustering[indices_balanceados, ]
+
+# Verificar que ambas clases estén presentes en los datos balanceados
+cat("Clases únicas en los datos balanceados:", unique(datos_balanceados_clustering$Cluster), "\n")
+
+# Verificar la proporción de clases en los datos balanceados
+prop_cluster <- prop.table(table(datos_balanceados_clustering$Cluster)) * 100
+
+# Imprimir las proporciones para asegurarnos de que todo esté correcto
+cat("Proporciones balanceadas:\n")
+cat(sprintf("Cluster 1: %.2f%%\n", prop_cluster["1"]))  # Asegúrate de usar "1" y "2" si las clases son numéricas
+cat(sprintf("Cluster 2: %.2f%%\n", prop_cluster["2"]))  # Lo mismo para "2"
+
+```
+```{r}
+#RANDOM FOREST TOTAL con datos balanceados
+
+# Particionamos los datos en conjuntos de entrenamiento y prueba
+set.seed(42)
+seleccion3 <- sample(x = 1:nrow(datos_clustering), nrow(datos_clustering) * 0.7, replace = FALSE)
+training3 <- datos_clustering[seleccion3, ]
+testing3 <- datos_clustering[-seleccion3, ]
+# Crear modelo random forest
+rf_model3 <- randomForest(Cluster ~ ., data = training3)
+
+# Visualizar el resumen del modelo
+print(rf_model3)
+```
+
+
+```{r}
+predictions3 <- predict(rf_model3, newdata = testing3)
+confusion3<-   confusionMatrix(predictions3, testing3$Cluster)
+print(confusion3)
+```
+```{r}
+# Extraer el segundo árbol del modelo Random Forest
+# Nota: Random Forest tiene múltiples árboles, por lo que estamos eligiendo el primero aquí.
+single_tree <- getTree(rf_model3, k = 1, labelVar = TRUE)
+
+# Crear un modelo de árbol de decisión con rpart para graficar
+library(rpart)
+tree_model3 <- rpart(Cluster ~ ., data = training3, method = "class")
+
+# Graficar el árbol
+rpart.plot(tree_model3, main = "Árbol de Decisión del Random Forest")
+```
+
+```{r}
+confusion_matrix3 <- table(predictions3, testing3$Cluster)
+print(confusion_matrix3)
+
+#Calculamos la precision del modelo:
+accuracy_rf_balanced <- (sum(diag(confusion_matrix3)) / sum(confusion_matrix3)) * 100
+print(paste("Accuracy: ", round(accuracy_rf_balanced, 2), "%"))
+
+#CÁLCULO DEL KAPPA
+
+# Calcular la matriz de confusión
+confusion3 <- confusionMatrix(predictions3, testing3$Cluster)
+
+# Verificar la estructura del objeto de la matriz de confusión
+str(confusion3)
+
+# Extraer el valor de Kappa
+kappa_rf_balanceado <- confusion3$overall['Kappa']
+
+# Mostrar Kappa
+print(paste("Kappa:", kappa_rf_balanceado*100))
+```
+
+```{r}
+#Gráfico interactivo de matriz
+
+
+confusion3 <- as.data.frame(confusion_matrix3)
+colnames(confusion3) <- c("Prediction", "Reference", "Frequency")
+
+
+graf_matriz_rf3 <- ggplot(data = confusion3, aes(x = Reference, y = Prediction, fill = Frequency)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "#5cacc4", high = "#9467bd") +
+  geom_text(aes(label = Frequency), color = "black", vjust = 1) +
+  labs(title = paste("Matriz de Confusion para RF sobre todas las variables \nAccuracy: ", round(accuracy_rf_balanced, 2), "%"),
+       x = "Actual",
+       y = "Predicted") +
+  theme_minimal()
+
+ggplotly(graf_matriz_rf3)
+```
+
+
+
+
+#=========================================================================================
+#===============Maquina de soporte vectorial e===============
+
+
+```{r}
+#Limpieza previa de los datos para continuar
+names(datos_clustering) <- gsub(" ", "_", names(datos_clustering)) 
+# Limpiar caracteres especiales (por ejemplo, comillas, puntos, etc.)
+names(datos_clustering) <- gsub("[^[:alnum:]_]", "", names(datos_clustering<- as.data.frame(datos_clustering)
+))
+```
+
+```{r}
+# Dividir los datos en características (X) y la variable objetivo (Cluster)
+X <- datos_clustering[, -which(names(datos_clustering) == "Cluster")]  # Eliminar 'Cluster' de X
+y <- datos_clustering$Cluster  # 'Cluster' es la variable objetivo
+
+# Verificar las dimensiones de X e y
+cat("Dimensiones de X:", dim(X), "\n")  # Debería tener las características
+cat("Longitud de y:", length(y), "\n")  # Debería ser la misma longitud que las filas de X
+```
+
+```{r}
+set.seed(123)
+indices_entrenamiento <- sample(1:nrow(datos_clustering), 0.7 * nrow(datos_clustering))
+X_entrenamiento <- X[indices_entrenamiento, ]
+y_entrenamiento <- y[indices_entrenamiento]
+X_prueba <- X[-indices_entrenamiento, ]
+y_prueba <- y[-indices_entrenamiento]
+
+# Verificar el número de filas en los datos de prueba
+cat("Número de filas en datos_prueba: ", nrow(X_prueba), "\n")
+cat("Número de filas en y_prueba: ", length(y_prueba), "\n")
+
+
+
+```
+
+
+
+
+
+
+
+
+#El modelo anterior se descarta solo se hace validación cruzada
+
+
+```{r}
+# Definir el control de validación cruzada
+control <- trainControl(method = "cv",   # Método de validación cruzada: "cv" para validación cruzada
+                        number = 5)      # Número de folds en la validación cruzada
+
+# Entrenar el modelo utilizando la validación cruzada
+modelo <- train(Cluster ~ .,             # Fórmula de la variable objetivo y características
+                data = datos_clustering,         # Conjunto de datos
+                method = "svmRadial",         # Algoritmo de clasificación / Máquinas de vectores de soporte con kernel radial
+                trControl = control)    # Especifica el control de validación cruzada
+
+# Imprimir el resumen del modelo
+print(modelo)
+
+# Imprimir los resultados de la validación cruzada
+print(modelo$results)
+```
+
+
+
+```{r}
+# Definir el control de validación cruzada
+control <- trainControl(method = "cv", number = 5)
+
+# Entrenar el modelo utilizando la validación cruzada y búsqueda de cuadrícula
+modelo <- train(Cluster ~ ., data = datos_clustering, method = "svmRadial", trControl = control)
+
+# Imprimir el resumen del modelo
+print(modelo)
+
+# Entrenar el modelo SVM con kernel RBF utilizando el mejor parámetro C y sigma
+modelo_optimo <- train(Cluster ~ ., data = datos_clustering, method = "svmRadial", trControl = control,
+                       tuneGrid = expand.grid(C = 1.00, sigma = 0.07276369	))
+
+
+
+
+```
+
+```{r}
+# Realizar las predicciones en el conjunto de prueba
+predicciones_prueba_modelo_optimo <- predict(modelo_optimo, newdata = X_prueba)
+
+# Verificar las longitudes
+cat("Longitud de las predicciones: ", length(predicciones_prueba_modelo_optimo), "\n")
+cat("Longitud de y_prueba: ", length(y_prueba), "\n")
+
+# Si la longitud de las predicciones no coincide con la de y_prueba, ajustar
+if (length(predicciones_prueba_modelo_optimo) != length(y_prueba)) {
+  # Ajustar las predicciones para que coincidan con la longitud de y_prueba
+  # Este paso es para asegurarse de que ambas sean del mismo tamaño sin cambiar los nombres
+  cat("Ajustando las predicciones para coincidir con la longitud de y_prueba...\n")
+  predicciones_prueba_modelo_optimo <- predicciones_prueba_modelo_optimo[1:length(y_prueba)]
+}
+
+# Verificar si las longitudes ahora coinciden
+cat("Longitud de las predicciones ajustadas: ", length(predicciones_prueba_modelo_optimo), "\n")
+cat("Longitud de y_prueba: ", length(y_prueba), "\n")
+
+# Convertir las predicciones y y_prueba en factores (si es necesario)
+# Para evitar cualquier desajuste de clases
+if (!is.factor(predicciones_prueba_modelo_optimo)) {
+  predicciones_prueba_modelo_optimo <- factor(predicciones_prueba_modelo_optimo, levels = levels(y_prueba))
+}
+
+if (!is.factor(y_prueba)) {
+  y_prueba <- factor(y_prueba, levels = levels(predicciones_prueba_modelo_optimo))
+}
+
+# Calcular la matriz de confusión sobre el conjunto de prueba
+matriz_confusion_prueba <- confusionMatrix(predicciones_prueba_modelo_optimo, y_prueba)
+
+# Imprimir la matriz de confusión
+print(matriz_confusion_prueba)
+
+# Calcular Kappa
+kappa_value_modelo_optimo <- matriz_confusion_prueba$overall["Kappa"]
+cat("Índice Kappa:", round(kappa_value_modelo_optimo, 2), "\n")
+
+# Calcular el Error de Precisión (obb_error_precision)
+error_precision_modelo_optimo <- 1 - mean(predicciones_prueba_modelo_optimo == y_prueba)
+cat("Error de Precisión (obb_error_precision):", round(error_precision_modelo_optimo * 100, 2), "%\n")
+
+
+
+```
+```{r}
+# Obtener las predicciones de la validación cruzada
+predicciones_cv <- predict(modelo, newdata = datos_clustering)
+
+# Calcular la matriz de confusión para todas las predicciones de la validación cruzada
+matriz_confusion_cv <- confusionMatrix(predicciones_cv, datos_clustering$Cluster)
+
+# Imprimir la matriz de confusión
+print(matriz_confusion_cv)
+
+# Calcular Kappa para la validación cruzada
+kappa_value_cv <- matriz_confusion_cv$overall["Kappa"]
+cat("Índice Kappa (validación cruzada):", round(kappa_value_cv, 2), "\n")
+
+```
+
+```{r}
+# Comparar las predicciones con las etiquetas reales
+predicciones_correctas_cv <- predicciones_cv == datos_clustering$Cluster
+
+# Número de predicciones correctas e incorrectas
+cat("Número de predicciones correctas: ", sum(predicciones_correctas_cv), "\n")
+cat("Número de predicciones incorrectas: ", sum(!predicciones_correctas_cv), "\n")
+
+```
+
+```{r}
+# Crear un dataframe con las observaciones, sus predicciones y si son correctas
+resultados_cv <- data.frame(Real = datos_clustering$Cluster, 
+                            Predicho = predicciones_cv, 
+                            Correcto = predicciones_correctas_cv)
+
+# Filtrar las predicciones correctas
+predicciones_correctas_df <- resultados_cv[resultados_cv$Correcto == TRUE, ]
+cat("Predicciones correctas:\n")
+print(predicciones_correctas_df)
+
+# Filtrar las predicciones incorrectas
+predicciones_incorrectas_df <- resultados_cv[resultados_cv$Correcto == FALSE, ]
+cat("Predicciones incorrectas:\n")
+print(predicciones_incorrectas_df)
+
+```
+
+```{r}
+# Calcular la precisión (Accuracy) manualmente
+precision_cv <- mean(predicciones_cv == datos_clustering$Cluster)
+cat("Precisión del modelo (validación cruzada): ", round(precision_cv * 100, 2), "%\n")
+
+precision_entrenamiento_modelo_optimo <- precision_cv
+```
+ 
+
+```{r}
+# Imprimir la matriz de confusión
+print(matriz_confusion_cv)
+
+# Verificar todas las métricas disponibles
+matriz_confusion_cv$overall
+matriz_confusion_cv$byClass
+
+
+
+```
+```{r}
+cat("Precisión calculada manualmente (exactitud):", round(precision_cv * 100, 2), "%\n")
+
+```
+
+```{r}
+df_confusion_msv <- as.data.frame(confusion2$table)
+colnames(df_confusion_msv) <- c("Prediction", "Reference", "Freq")
+
+grafico_confusion_msv <- ggplot(data = df_confusion_msv, aes(x = Reference, y = Prediction, fill = Freq)) +
+  geom_tile(color = "black", size = 0.3) +  # Ajuste del borde de las celdas
+  geom_text(aes(label = Freq), color = "white", fontface = "bold", vjust = 0.5) +  # Etiquetas más legibles
+  scale_fill_gradient(low = "#5cacc4", high = "#9467bd") +
+  labs(title = paste("Matriz de Confusión SVM\nPrecisión:", round(precision_cv * 100, 2), "%"),
+       x = "Real",
+       y = "Predicho") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotar etiquetas de los ejes si son largas
+
+# Convertir el gráfico en interactivo con plotly
+graf_matriz_msv <- ggplotly(grafico_confusion_msv)
+
+# Mostrar el gráfico interactivo
+graf_matriz_msv
+
+
+
+```
+
+
+```{r}
+kappa_value_modelo_optimo <- matriz_confusion_cv$overall["Kappa"]
+cat("Índice Kappa:", round(kappa_value_modelo_optimo, 2), "\n")
+
+```
+
+
+
+```{r}
+metrics <- data.frame (
+  modelo = c("RF_total", "RF_Seleccion", "Modelo_RF_balanceado",  "MSV_optimizado"),
+  Accuracy = c(accuracy_rf_total,accuracy_rf_selec, accuracy_rf_balanced, precision_entrenamiento_modelo_optimo*100),  
+  Kappa =
+    c(kappa_rf_total*100, kappa_rf_selec*100, kappa_rf_balanceado*100,kappa_value_modelo_optimo*100),        
+  OBB_Error = c(rf_model1$err.rate[5,1]*100, rf_model2$err.rate[5,1]*100, rf_model3$err.rate[5,1]*100, 
+             error_precision_modelo_optimo*100) 
+  
+)
+print(metrics)
+```
+
+
+
+
+```{r}
+# Comparación de métricas
+print(accuracy_rf_total)  # Verifica que esta variable esté definida
+print(kappa_rf_total)     # Verifica que esta variable esté definida
+
+# Verifica si alguna métrica es NA
+is.na(accuracy_rf_total)
+is.na(kappa_rf_total)
+
+# Verificar el tipo de todas las variables antes de crear el dataframe
+print(str(accuracy_rf_total))  # Esto te ayudará a ver si es numérica
+
+# Crear el dataframe de métricas para comparar
+metrics <- data.frame(
+  Model = c("RF_total", "RF_Seleccion", "Modelo_RF_balanceado",  "MSV_optimizado"),
+  Accuracy = c(accuracy_rf_total, accuracy_rf_selec, accuracy_rf_balanced,  precision_entrenamiento_modelo_optimo * 100),  
+  Kappa = c(kappa_rf_total*100, kappa_rf_selec*100, kappa_rf_balanceado*100,  kappa_value_modelo_optimo*100),
+  OBB_Error = c(rf_model1$err.rate[5, 1]*100, rf_model2$err.rate[5, 1]*100, rf_model3$err.rate[5, 1]*100, 
+                 error_precision_modelo_optimo*100) 
+)
+
+# Imprimir el dataframe para asegurarte de que todo esté correcto
+print(metrics)
+
+```
+#    RF_Seleccion es claramente el mejor modelo en términos de precisión (98.11%) y Kappa (95.94), lo que indica que tiene una mayor capacidad de hacer predicciones correctas y una excelente concordancia con las etiquetas reales, ajustadas por el azar.
+#RF_total y Modelo_RF_balanceado tienen el mismo rendimiento en términos de precisión y Kappa, pero RF_Seleccion es superior al mostrar un OBB_Error más bajo, lo que indica que el balanceo no ha producido mejoras significativas en estos dos modelos.
+
+#En resumen, RF_Seleccion es el modelo más efectivo de los tres, con la mejor precisión y el menor error en comparación con el resto.
+```{r}
+
+# Crear el dataframe con las métricas
+metrics <- data.frame(
+  Model = c("RF_total", "RF_Seleccion", "Modelo_RF_balanceado",  "MSV_optimizado"),
+  Accuracy = c(accuracy_rf_total*100, accuracy_rf_selec, accuracy_rf_balanced,  precision_entrenamiento_modelo_optimo * 100),  
+  Kappa = c(kappa_rf_total*100, kappa_rf_selec*100, kappa_rf_balanceado*100,  kappa_value_modelo_optimo*100),
+  OBB_Error = c(rf_model1$err.rate[5, 1]*100, rf_model2$err.rate[5, 1]*100, rf_model3$err.rate[5, 1]*100 
+                , error_precision_modelo_optimo*100) 
+)
+
+# Verifica si los datos se ven correctos
+print(metrics)
+
+# Crear un gráfico de barras con plotly
+grafico_metricas <- plot_ly(metrics, x = ~Model, y = ~Accuracy, type = 'bar', name = 'Accuracy', marker = list(color = '#de528c')) %>%
+  add_trace(y = ~Kappa, name = 'Kappa', type = 'bar', marker = list(color = '#8de0a6')) %>%
+  add_trace(y = ~OBB_Error, name = 'OBB Error', type = 'bar', marker = list(color = '#FEE08B')) %>%
+  layout(
+    title = 'Comparación de Métricas por Modelo',
+    barmode = 'group',
+    xaxis = list(title = 'Modelos'),
+    yaxis = list(title = 'Porcentaje (%)'),
+    legend = list(title = list(text = 'Métricas'))
+  )
+
+# Mostrar el gráfico
+grafico_metricas
+
+```
+
+
+
+
+
+
+
+
+***Modelo_RF_balanceado tiene la mejor precisión (100%) y Kappa (1.0), pero esto también podría sugerir que el modelo ha sobreajustado los datos de entrenamiento, ya que tiene un rendimiento perfecto en ellos. Es importante verificar si este modelo generaliza bien a nuevos datos o si muestra una caída significativa en el rendimiento cuando se prueba con datos no vistos.***
+***El modello Random Forest con variables seleccionadas tiene un rendimiento 98,86 y un capa de 97***
+
+#Kappa: Un valor de Kappa cercano a 1 indica una alta concordancia entre las predicciones del modelo y las etiquetas reales, y es una buena indicación de la calidad del modelo. Si Kappa es muy bajo, el modelo no está funcionando bien.Los modelos con un Kappa de 0.9 o superior (como el RF_Seleccion, Modelo_RF_balanceado, MSV_optimizado) muestran un rendimiento bastante bueno.
+
+#Error OOB (Out-Of-Bag): da una idea de qué tan bien el modelo generaliza. Un error bajo es un buen indicador de que el modelo tiene un buen desempeño en datos no vistos.
+    
+    
+#Validación cru<ada de todos los modelos
+```{r}
+
+#Validación cru<ada de todos los modelos
+# Configuración de la validación cruzada (10 pliegues)
+ctrl <- trainControl(method = "cv", number = 10)
+
+# 1. Modelo RF_total
+rf_total_model <- train(Cluster ~ ., data = datos_clustering, 
+                        method = "rf", trControl = ctrl)
+
+# 2. Modelo RF_Seleccion
+rf_seleccion_model <- train(Cluster ~ ., data = datos_seleccionados, 
+                             method = "rf", trControl = ctrl)
+
+# 3. Modelo Modelo_RF_balanceado
+rf_balanceado_model <- train(Cluster ~ ., data = datos_balanceados_clustering, 
+                              method = "rf", trControl = ctrl)
+
+
+# 4. Modelo MSV optimizado (con parámetros ajustados si es necesario)
+msv_optimizado_model <- train(Cluster ~ ., data = datos_clustering, 
+                              method = "svmRadial", trControl = ctrl, 
+                              tuneGrid = expand.grid(C = 1, sigma = 0.07452337))  # Ajusta si es necesario
+
+# Resumen de resultados de validación cruzada
+cat("Resultados de la validación cruzada para los modelos:\n")
+
+# Mostrar resultados de cada modelo
+cat("\nResultados para RF_total:\n")
+print(rf_total_model$results)
+
+cat("\nResultados para RF_Seleccion:\n")
+print(rf_seleccion_model$results)
+
+cat("\nResultados para RF_balanceado:\n")
+print(rf_balanceado_model$results)
+
+cat("\nResultados para MSV optimizado:\n")
+print(msv_optimizado_model$results)
+
+
+
+```
+
+
+#Comparación
+```{r}
+# Obtener los resultados de validación cruzada para cada modelo
+rf_total_results <- rf_total_model$results
+rf_seleccion_results <- rf_seleccion_model$results
+rf_balanceado_results <- rf_balanceado_model$results
+msv_optimizado_results <- msv_optimizado_model$results
+
+# Crear un dataframe para consolidar los resultados
+resultados_completos <- data.frame(
+  Modelo = c("RF_total", "RF_Seleccion", "RF_Balanceado",  "MSV_Optimizado"),
+  Accuracy = c(
+    max(rf_total_results$Accuracy), 
+    max(rf_seleccion_results$Accuracy), 
+    max(rf_balanceado_results$Accuracy), 
+    max(msv_optimizado_results$Accuracy)
+  ),
+  Kappa = c(
+    max(rf_total_results$Kappa), 
+    max(rf_seleccion_results$Kappa), 
+    max(rf_balanceado_results$Kappa), 
+    max(msv_optimizado_results$Kappa)
+  ),
+  AccuracySD = c(
+    min(rf_total_results$AccuracySD), 
+    min(rf_seleccion_results$AccuracySD), 
+    min(rf_balanceado_results$AccuracySD), 
+    min(msv_optimizado_results$AccuracySD)
+  )
+)
+
+# Imprimir los resultados consolidados
+print(resultados_completos)
+
+```
+#RF_Balanceado es el modelo más preciso, con la mayor Accuracy (94.55%) y el mayor Kappa (89.11), lo que indica que tiene la mejor capacidad de predicción y concordancia con las etiquetas reales entre los modelos comparados.
+
+#RF_Seleccion también tiene un buen desempeño, con una precisión del 94.27% y un Kappa de 88.24, aunque ligeramente inferior al RF_Balanceado.
+
+#RF_total tiene un desempeño ligeramente inferior a RF_Seleccion y RF_Balanceado, pero aún ofrece una buena precisión de 93.73%.
+
+#MSV_Optimizado muestra un rendimiento muy bajo, con una precisión del 58.53% y un Kappa de 0, lo que indica que este modelo no es útil para el problema en cuestión.
+
+
+```{r}
+
+
+# Crear el dataframe para los resultados consolidados y multiplicar todo por 100
+resultados_completos <- data.frame(
+  Modelo = c("RF_total", "RF_Seleccion", "RF_Balanceado",  "MSV_Optimizado"),
+  Accuracy = c(
+    max(rf_total_results$Accuracy) * 100, 
+    max(rf_seleccion_results$Accuracy) * 100, 
+    max(rf_balanceado_results$Accuracy) * 100, 
+    max(msv_optimizado_results$Accuracy) * 100
+  ),
+  Kappa = c(
+    max(rf_total_results$Kappa) * 100, 
+    max(rf_seleccion_results$Kappa) * 100, 
+    max(rf_balanceado_results$Kappa) * 100, 
+    max(msv_optimizado_results$Kappa) * 100
+  ),
+  AccuracySD = c(
+    min(rf_total_results$AccuracySD) * 100, 
+    min(rf_seleccion_results$AccuracySD) * 100, 
+    min(rf_balanceado_results$AccuracySD) * 100, 
+    min(msv_optimizado_results$AccuracySD) * 100
+  )
+)
+
+# Imprimir los resultados consolidados para verificar
+print(resultados_completos)
+
+# Crear el gráfico de barras con plotly
+grafico_cruzamiento <- plot_ly(resultados_completos, x = ~Modelo, y = ~Accuracy, type = 'bar', name = 'Accuracy', marker = list(color = '#de528c')) %>%
+  add_trace(y = ~Kappa, name = 'Kappa', type = 'bar', marker = list(color = '#8de0a6')) %>%
+  add_trace(y = ~AccuracySD, name = 'Accuracy SD', type = 'bar', marker = list(color = '#FEE08B')) %>%
+  layout(
+    title = 'Comparación de Métricas de validación cruzada por Modelo',
+    barmode = 'group',
+    xaxis = list(title = 'Modelos'),
+    yaxis = list(title = 'Porcentaje (%)'),
+    legend = list(title = list(text = 'Métricas')),
+    plot_bgcolor = "white" # Color de fondo del gráfico
+  )
+
+# Mostrar el gráfico
+grafico_cruzamiento
+
+```
+
+
+
+
+
+
+
+
+
+
+#=========================================================
+#=========================================================
+
+##-------UNIR CON DATOS DEL BANCO MUNDIAL
+#El objetivo de la incorporación de los nuevos datos es reforzar el overall score y obtener mejores resultados en el análisis
+
+```{r}
+#Nuevo dataset
+data_nueva2 <- read.csv("data_nueva2.csv")
+head(data_nueva2)
+```
+```{r}
+# Ordenar ambos datasets por la columna de país
+datos_clustering <- datos_clustering %>% arrange("Country")
+data_nueva <- data_nueva2 %>% arrange(Country.Name)
+
+# Ahora  asignar la columna 'Country' de data_nueva a datos_clustering
+datos_clustering$Country <- data_nueva2$Country.Name
+```
+
+```{r}
+# Asegúrarse de que la longitud de ambos datasets coincida
+datos_clustering$Country <- data_nueva2$Country.Name
+
+#Unir con datos clustering
+
+datos_clustering_nuevo <- inner_join(datos_clustering,data_nueva2, by = c("Country"="Country.Name"))
+datos_clustering_nuevo
+```
+#Limpieza del nuevo dataset
+
+```{r}
+#Datos limpios sin NA
+datos_clustering_nuevo <- datos_clustering_nuevo%>%
+  drop_na()
+
+
+#Comprobación
+nulos_por_variable <-datos_clustering_nuevo %>%
+  summarise_all(~ sum(is.na(.)))
+
+print(nulos_por_variable)
+```
+#Convertir a dataframe
+```{r}
+#Convertir a df
+datos_clustering_nuevo <- as.data.frame(datos_clustering_nuevo)
+head(datos_clustering_nuevo)
+```
+
+```{r}
+str(datos_clustering_nuevo)
+```
+#Se incorporan las nuevas variables:
+#Promedio_10_Años_GDP_PerCap; ¨Promedio del PIB  de 10 años costante a precio de 2015 en dólares, usado como paridad del poder adquisitivo.
+#Promedio_10_Años_Crec_pib: Promedio del crecimiento de la economía
+#Se toma un promedio de  10 años para reforzar más el análisis y no tomar sólo el úlimo año
+
+#Efectividad.gobierno:  es un indicador de governanza elaborado por el banco mumdial, incluye aspectos como la competencia de la burocracia y la calidad de los servicios públicos, así como su grado de independencia de presiones políticas, la calidad de las políticas publicas,entre otros.
+
+#Control.corrupcion:  Considera la medida en que el poder público se ejerce para obtener ganancias privadas, incluyendo las pequeñas y las grandes formas de corrupción, así como el grado en que el Estado está capturado por intereses privados.
+
+#Cal.Regulacion:comprende la habilidad del gobierno para formular e implementar políticas y regulaciones que permitan y promuevan el desarrollo del mercado y del sector privado
+
+#Voz_y_Rendicion_cuentas:Considera varios aspectos del respeto y ejercicio de los derechos humanos y políticos y de las libertades civiles de los individuos, tales como la participación en la elección de gobernantes, la libertad de expresión y la libertad de asociación
+
+
+#según los indicadores empleados por esta medición, los países con una mayor calidad en sus instituciones y en su gobernabilidad, también suelen tener mayores niveles de crecimiento económico y desarrollo. Siguiendo este argumento, si un país mejora sus niveles de gobernabilidad en todos sus componentes, es probable que también mejoren sus niveles de desarrollo.
+
+
+```{r}
+summary(datos_clustering_nuevo)
+```
+
+
+
+```{r}
+# Definir las columnas de interés
+columnas <- c("Promedio_10_Años_GDP_PerCap", "Promedio_10_Años_Crec_pib", "Efectividad.gobierno", "Control.corrupcion", "Voz_y_Rendicion_cuentas")
+
+# Filtrar el dataframe solo con las columnas seleccionadas
+datos_boxplot1 <- datos_clustering_nuevo[, columnas]
+
+# Convertir los datos a formato largo (long format) para ggplot
+datos_largos1 <- datos_boxplot1 %>%
+  pivot_longer(cols = everything(), 
+               names_to = "Variable", 
+               values_to = "Valor")
+
+# Crear gráfico con ggplot
+graf_frec_nuevas_var <- ggplot(datos_largos1, aes(x = Valor, fill = Variable)) +
+  geom_histogram(bins = 30, color = "#d2fae2", alpha = 0.7) +  # Ajustamos la transparencia con alpha
+  facet_wrap(~ Variable, scales = 'free', ncol = 3) +  # Ajuste de facetas
+  scale_fill_viridis_d() +  # Colores suaves con viridis
+  theme_minimal() + 
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),  # Tamaño y estilo de las etiquetas de las facetas
+    axis.text.x = element_text(angle = 45, hjust = 1),  # Rotación de las etiquetas del eje X
+    axis.text.y = element_text(size = 10),  # Tamaño de las etiquetas del eje Y
+    axis.title = element_text(size = 12, face = "bold"),  # Títulos más grandes
+    panel.grid = element_blank()  # Eliminar las líneas de la cuadrícula
+  ) + 
+  labs(
+    title = "Distribución de las Características",
+    x = "Valor de la Característica",
+    y = "Frecuencia"
+  )
+
+# Hacer gráfico interactivo con ggplotly
+ggplotly(graf_frec_nuevas_var, tooltip = 'y') %>%
+  layout(
+    title = "Distribución de las Características",
+    #xaxis = list(title = "Valor de la Característica"),
+    yaxis = list(title = "Frecuencia"),
+    showlegend = FALSE  # Ocultar leyenda, si no es necesaria
+  )
+```
+
+#Factorizar el nuevo dataset
+
+```{r}
+#Factorizar el nuevo dataset
+datos_clustering_nuevo$Cluster <- as.factor(datos_clustering_nuevo$Cluster)
+```
+
+
+```{r}
+head(datos_clustering_nuevo)
+```
+
+```{r}
+str(datos_clustering_nuevo)
+```
+
+```{r}
+datatable(datos_clustering_nuevo)
+```
+
+#Comparar crecimiento de la economía, PIB per capita e integridad gubernamental por cluster
+
+```{r}
+#Comparar crecimiento de la economía, PIB per capita e integridad gubernamental por cluster
+# Calcular la tabla base
+cluster_comparison <- datos_clustering_nuevo %>%
+  group_by(Cluster) %>%
+  summarise(
+    Promedio_PIB_perCapita = mean(Promedio_10_Años_GDP_PerCap, na.rm = TRUE),
+    Promedio_Crecimiento = mean(Promedio_10_Años_Crec_pib, na.rm = TRUE),
+    Promedio_Integridad_gubernamental = mean(`Government_Integrity`, na.rm = TRUE)
+  )
+
+# Calcular el total de cada columna
+total_PIB_perCapita <- sum(cluster_comparison$Promedio_PIB_perCapita)
+total_Crecimiento <- sum(cluster_comparison$Promedio_Crecimiento)
+total_Integridad_gubernamental <- sum(cluster_comparison$Promedio_Integridad_gubernamental)
+
+# Agregar columnas con los porcentajes
+cluster_comparison <- cluster_comparison %>%
+  mutate(
+    Porcentaje_PIB_perCapita = (Promedio_PIB_perCapita / total_PIB_perCapita) * 100,
+    Porcentaje_Crecimiento = (Promedio_Crecimiento / total_Crecimiento) * 100,
+    Porcentaje_Integridad_gubernamental= (Promedio_Integridad_gubernamental / total_Integridad_gubernamental) * 100
+  )
+
+# Ver los resultados con los porcentajes
+print(cluster_comparison)
+```
+
+```{r}
+# Seleccionar solo las columnas de porcentajes
+cluster_comparison_porcentajes <- cluster_comparison %>%
+  select(Cluster, Porcentaje_PIB_perCapita, Porcentaje_Crecimiento, Porcentaje_Integridad_gubernamental)
+
+# Imprimir solo los porcentajes
+print(cluster_comparison_porcentajes)
+```
+
+```{r}
+# Convertir los datos a formato largo (long format) para facilitar la visualización
+cluster_comparison_long <- cluster_comparison_porcentajes %>%
+  pivot_longer(cols = starts_with("Porcentaje"), 
+               names_to = "Indicador", 
+               values_to = "Porcentaje")
+
+# Crear el gráfico de barras con Plotly
+fig_comp_cluster <- plot_ly(cluster_comparison_long, 
+               x = ~Cluster, 
+               y = ~Porcentaje, 
+               color = ~Indicador,  # Cambié aquí a 'Indicador' para que cada barra sea diferenciada por tipo de indicador
+               colors = c("Porcentaje_PIB_perCapita" = "#d6496c", 
+                          "Porcentaje_Crecimiento" = "#7db8a2", 
+                          "Porcentaje_Integridad_gubernamental" = "#f1c232"),   
+               type = 'bar', 
+               text = ~paste(Indicador, ": ", round(Porcentaje, 2), "%"),
+               hoverinfo = 'text') %>%
+  layout(title = "Porcentaje de PIB per Capita, Crecimiento e Integridad Gubernamental por Cluster",
+         xaxis = list(title = "Cluster"),
+         yaxis = list(title = "Porcentaje (%)"),
+         barmode = 'group')
+
+# Mostrar el gráfico
+fig_comp_cluster
+```
+
+```{r}
+#Comparar promedio de overall score por cluster
+# Calcular la tabla base
+cluster_score <- datos_clustering_nuevo %>%
+  group_by(Cluster) %>%
+  summarise(
+    Promedio_score = mean(Overall_score, na.rm = TRUE),
+    
+  )
+
+# Calcular el total de cada columna
+total_score <- sum(cluster_score$Promedio_score)
+
+
+# Agregar columnas con los porcentajes
+cluster_score<- cluster_score %>%
+  mutate(
+    Porcentaje_score = (Promedio_score / total_score) * 100,
+   
+  )
+
+# Ver los resultados con los porcentajes
+print(cluster_score)
+```
+```{r}
+# Seleccionar solo las columnas de porcentajes
+cluster_score_porcentajes <- cluster_score %>%
+  select(Cluster, Porcentaje_score)
+
+# Imprimir solo los porcentajes
+print(cluster_score_porcentajes)
+```
+
+```{r}
+# Crear el gráfico de torta para los porcentajes de score por cluster
+fig_cluster_score <- plot_ly(cluster_score, labels = ~Cluster, values = ~Porcentaje_score, type = 'pie',
+                             textinfo = 'label+percent', 
+                             marker = list(colors = c("#5cacc4", "#9467bd", "#ff7f0e", "#2ca02c")),  #
+                             hoverinfo = 'label+percent+value', showlegend = TRUE)
+
+# Añadir título y anotaciones
+graf_cluster_score <- fig_cluster_score %>% layout(title = 'Distribución de Score Promedio por Cluster', 
+                                                   annotations = list(
+                                                     list(text = 'Score', x = 0.5, y = 0.5, showarrow = FALSE)))
+
+# Mostrar el gráfico interactivo
+graf_cluster_score
+```
+
+```{r}
+#Comparar promedio score con crec de la economia 
+
+# Calcular la tabla base
+cluster_comparison1 <- datos_clustering_nuevo %>%
+  group_by(Cluster) %>%
+  summarise(
+    Promedio_PIB_perCapita = mean(Promedio_10_Años_GDP_PerCap, na.rm = TRUE),
+    Promedio_score = mean(Overall_score, na.rm = TRUE),
+    
+  )
+
+# Calcular el total de cada columna
+total_PIB_perCapita <- sum(cluster_comparison1$Promedio_PIB_perCapita)
+total_score <- sum(cluster_comparison1$Promedio_score)
+
+
+# Agregar columnas con los porcentajes
+cluster_comparison1 <- cluster_comparison1 %>%
+  mutate(
+    Porcentaje_PIB_perCapita = (Promedio_PIB_perCapita / total_PIB_perCapita) * 100,
+    Porcentaje_score = (Promedio_score / total_score) * 100,
+    
+  )
+
+# Seleccionar solo las columnas de porcentajes
+cluster_comparison_porcentajes1 <- cluster_comparison1 %>%
+  select(Cluster, Porcentaje_PIB_perCapita, Porcentaje_score)
+
+# Imprimir solo los porcentajes
+print(cluster_comparison_porcentajes1)
+```
+
+```{r}
+# Convertir los datos a formato largo (long format) para facilitar la visualización
+cluster_comparison_long1 <- cluster_comparison_porcentajes1 %>%
+  pivot_longer(cols = starts_with("Porcentaje"), 
+               names_to = "Indicador", 
+               values_to = "Porcentaje")
+
+fig_cluster_2 <- plot_ly(cluster_comparison_long1, 
+               x = ~Cluster, 
+               y = ~Porcentaje, 
+               color = ~Indicador,  
+               colors = c("Porcentaje_PIB_perCapita" = "#d6496c", 
+                          "Porcentaje_score" = "#7db8a2"),   
+               type = 'bar', 
+               text = ~paste(Indicador, ": ", round(Porcentaje, 2), "%"),
+               hoverinfo = 'text') %>%
+  layout(title = "Porcentaje de PIB per Capita, Porcentaje score por Cluster",
+         xaxis = list(title = "Cluster"),
+         yaxis = list(title = "Porcentaje (%)"),
+         barmode = 'group',   # Esto asegura que las barras estén agrupadas por Cluster
+         xaxis = list(type = "category")  # Esto asegura que Cluster sea tratado como una categoría
+  )
+
+fig_cluster_2
+```
+
+
+`
+
+
+#**modelo de regresion multiple
+
+
+#Previamente correlación
+
+```{r}
+#Previamente correlación
+# Seleccionar solo las variables numéricas
+datos_numericos <- datos_clustering_nuevo[, sapply(datos_clustering_nuevo, is.numeric)]
+
+# Calcular la matriz de correlación
+correlation_matrix1 <- cor(datos_numericos)
+
+
+
+```
+
+
+```{r}
+
+
+# Convertir la matriz de correlación en un dataframe largo
+correlation_df1 <- as.data.frame(as.table(correlation_matrix1))
+
+# Crear el heatmap con Plotly
+graf_cor1 <- plot_ly(
+  data = correlation_df1,
+  x = ~Var1,  # Las filas de la matriz de correlación (variables)
+  y = ~Var2,  # Las columnas de la matriz de correlación (variables)
+  z = ~Freq,  # Los valores de correlación
+  type = "heatmap",
+  colors = "viridis",  # Colores usando la paleta Viridis
+  colorbar = list(title = "Correlación"),  # Etiqueta de la barra de color
+  showscale = TRUE  # Mostrar la escala de colores
+) %>%
+  layout(
+    title = "Matriz de Correlación de las Variables Numéricas",
+    xaxis = list(title = "Variable 1"),
+    yaxis = list(title = "Variable 2")
+  )
+graf_cor1
+
+```
+
+```{r}
+# Seleccionar solo las variables numéricas
+datos_numericos <- datos_clustering_nuevo[, sapply(datos_clustering_nuevo, is.numeric)]
+
+# Calcular la matriz de correlación
+correlation_matrix1 <- cor(datos_numericos)
+
+# Umbral de correlación (puedes cambiar el valor a 0.8, 0.9, etc.)
+threshold <- 0.8
+
+# Convertir la matriz de correlación a un dataframe largo
+correlation_df <- as.data.frame(as.table(correlation_matrix1))
+
+# Filtrar los pares de variables con correlación alta (excluyendo la diagonal)
+highly_correlated <- correlation_df[abs(correlation_df$Freq) > threshold & correlation_df$Var1 != correlation_df$Var2, ]
+
+# Mostrar las variables con alta correlación
+print(highly_correlated)
+
+```
+
+
+
+```{r}
+# Extraer las correlaciones más bajas
+
+
+correlation_long <- melt(correlation_matrix1)
+
+# Filtrar para que no incluya la correlación de cada variable consigo misma
+correlation_long <- correlation_long[correlation_long$Var1 != correlation_long$Var2, ]
+
+# Filtrar las correlaciones menores a 0.1 (puedes ajustarlo)
+low_correlation <- correlation_long[abs(correlation_long$value) < 0.1, ]
+
+# Ver las variables con baja correlación
+print(low_correlation)
+```
+```{r}
+# Convertir la matriz de correlación a formato largo
+correlation_long <- melt(correlation_matrix1)
+
+# Filtrar las correlaciones entre diferentes variables (no consigo misma)
+correlation_long <- correlation_long[correlation_long$Var1 != correlation_long$Var2, ]
+
+# Filtrar las correlaciones mayores a 0.8 (ajusta este valor según lo que necesites)
+alta_correlation <- correlation_long[abs(correlation_long$value) > 0.8, ]
+
+# Ordenar por la correlación más alta a la más baja
+alta_correlation_sorted <- alta_correlation[order(-abs(alta_correlation$value)), ]
+
+# Imprimir las primeras 5 correlaciones más altas
+head(alta_correlation_sorted, 10)
+```
+
+
+
+
+```{r}
+#Regresión 
+
+# Convertir la columna cluster a caracteres y luego filtrar
+cluster_1_data <- subset(datos_clustering_nuevo, as.character(Cluster) == "1")
+cluster_2_data <- subset(datos_clustering_nuevo, as.character(Cluster) == "2")
+
+
+# Filtrar datos para el Cluster 1
+df_cluster1 <- subset(datos_clustering_nuevo, Cluster == "1")
+# Filtrar datos para el Cluster 2
+df_cluster2 <- subset(datos_clustering_nuevo, Cluster == "2")
+```
+
+
+
+
+
+
+
+
+#Regresión modelo lasso que permite filtrar algun problema de correlación
+```{r}
+#Regresión lineal multiple con lasso
+
+X_1 <- as.matrix(df_cluster1[, c("Investment_Freedom", 
+                               "Fiscal_Health", 
+                               "Promedio_10_Años_Crec_pib", 
+                               "Judicial_Effectiveness", 
+                               "Efectividad.gobierno", 
+                               "Cal.Regulacion", 
+                               "Property_Rights", 
+                               "Tax_Burden", 
+                               "Government_Integrity", 
+                               "Labor_Freedom", 
+                               "Business_Freedom")])
+
+# Variable dependiente
+y_1 <- df_cluster1$Promedio_10_Años_GDP_PerCap
+
+# Ajustar el modelo Lasso con validación cruzada
+
+modelo_lasso_1 <- cv.glmnet(X_1, y_1, alpha = 1)
+
+# Imprimir el valor de lambda que minimiza el error de validación cruzada
+cat("Valor óptimo de lambda Cluster 1:", modelo_lasso_1$lambda.min, "\n")
+
+# Obtener los coeficientes del modelo con el mejor lambda
+coeficientes_lasso_1 <- coef(modelo_lasso_1, s = "lambda.min")
+cat("Coeficientes del modelo Lasso con el valor óptimo de lambda:\n")
+print(coeficientes_lasso_1)
+
+# Predicciones con el modelo Lasso
+predicciones_lasso_1 <- predict(modelo_lasso_1, newx = X_1, s = "lambda.min")
+
+# Calcular el MSE (Error Cuadrático Medio)
+mse_lasso_1 <- mean((predicciones_lasso_1 - y_1)^2)
+cat("MSE del modelo Lasso:", mse_lasso_1, "\n")
+
+# Calcular R-cuadrado (R^2)
+r2_lasso_1 <- 1 - sum((predicciones_lasso_1 - y_1)^2) / sum((y_1 - mean(y_1))^2)
+cat("R-cuadrado del modelo Lasso:", r2_lasso_1, "\n")
+
+
+```
+
+
+
+
+```{r}
+#formula para la ecuacion
+# Obtener los coeficientes del modelo con el mejor lambda
+coeficientes_lasso_1 <- coef(modelo_lasso_1, s = "lambda.min")
+
+# Convertir los coeficientes a un data.frame
+coeficientes_lasso_1_df <- as.data.frame(as.matrix(coeficientes_lasso_1))
+coeficientes_lasso_1_df$Variable <- rownames(coeficientes_lasso_1_df)
+
+# Renombramos la columna de coeficientes para asegurarnos de que sea numérica
+colnames(coeficientes_lasso_1_df) <- c("Coeficiente", "Variable")
+
+# Asegurarnos de que los coeficientes sean numéricos (podría estar en un formato extraño)
+coeficientes_lasso_1_df$Coeficiente <- as.numeric(coeficientes_lasso_1_df$Coeficiente)
+
+# Filtrar las variables con coeficientes no nulos
+coeficientes_lasso_1_df <- coeficientes_lasso_1_df[coeficientes_lasso_1_df$Coeficiente != 0, ]
+
+cat("Ecuación de la regresión múltiple del Cluster 1:\n")
+
+# Imprimir el intercepto (si es distinto de cero)
+cat("Promedio_10_Años_GDP_PerCap =", round(coeficientes_lasso_1_df$Coeficiente[1], 2))
+
+# Imprimir el resto de la fórmula
+for (i in 2:nrow(coeficientes_lasso_1_df)) {
+  cat(" +", round(coeficientes_lasso_1_df$Coeficiente[i], 2), "*", coeficientes_lasso_1_df$Variable[i], "\n")
+}
+
+```
+
+#Investment_Freedom (232.50): Este coeficiente sugiere que, a medida que aumenta la libertad de inversión, el GDP per cápita promedio en los próximos 10 años aumenta en 232.50 unidades, manteniendo constantes las demás variables.
+
+#Fiscal_Health (6.67): Este coeficiente indica que a medida que mejora la salud fiscal de la economía, el GDP per cápita promedio en los próximos 10 años aumenta en 6.67 unidades, todo lo demás constante.
+
+#Promedio_10_Años_Crec_pib (-659.41): Un coeficiente negativo indica que un aumento en el crecimiento del PIB promedio en los últimos 10 años está asociado con una disminución en el GDP per cápita promedio en los próximos 10 años. Este resultado es interesante y podría sugerir que las economías que crecieron rápidamente en el pasado pueden enfrentar desafíos en el futuro.
+#Judicial_Effectiveness (189.70): A medida que la efectividad judicial aumenta, el GDP per cápita promedio en los próximos 10 años aumenta en 189.70 unidades, manteniendo constantes las otras variables.
+#Efectividad.gobierno (21225.49): Un valor considerablemente alto, lo que sugiere que la efectividad del gobierno tiene un impacto significativo en el GDP per cápita promedio a largo plazo.
+#Tax_Burden (-85.43): A medida que aumenta la carga tributaria, el GDP per cápita promedio en los próximos 10 años disminuye en 85.43 unidades.
+#Labor_Freedom (-295.84): A medida que la libertad laboral disminuye, el GDP per cápita promedio disminuye en 295.84 unidades.
+#Business_Freedom (190.13): A medida que aumenta la libertad empresarial, el GDP per cápita promedio aumenta en 190.13 unidades.
+#Las variables que tienen coeficiente cero fueron descartadas del modelo Lasso debido a su baja contribución en la predicción del GDP per cápita promedio en los próximos 10 años. Estas son:  Cal.Regulacion,  Property_Rights y government_Integrity
+
+
+
+```{r}
+# Filtrar las variables predictoras (asegúrate de excluir la variable dependiente)
+X_2 <- as.matrix(df_cluster2[, c("Investment_Freedom", 
+                               "Fiscal_Health", 
+                               "Promedio_10_Años_Crec_pib", 
+                               "Judicial_Effectiveness", 
+                               "Efectividad.gobierno", 
+                               "Cal.Regulacion", 
+                               "Property_Rights", 
+                               "Tax_Burden", 
+                               "Government_Integrity", 
+                               "Labor_Freedom", 
+                               "Business_Freedom")])
+
+# Variable dependiente
+y_2 <- df_cluster2$Promedio_10_Años_GDP_PerCap
+
+# Ajustar el modelo Lasso con validación cruzada
+
+modelo_lasso_2 <- cv.glmnet(X_2, y_2, alpha = 1)
+
+# Imprimir el valor de lambda que minimiza el error de validación cruzada
+cat("Valor óptimo de lambda Cluster 2:", modelo_lasso_2$lambda.min, "\n")
+
+# Obtener los coeficientes del modelo con el mejor lambda
+coeficientes_lasso_2 <- coef(modelo_lasso_2, s = "lambda.min")
+cat("Coeficientes del modelo Lasso con el valor óptimo de lambda:\n")
+print(coeficientes_lasso_2)
+
+# Predicciones con el modelo Lasso
+predicciones_lasso_2 <- predict(modelo_lasso_2, newx = X_2, s = "lambda.min")
+
+# Calcular el MSE (Error Cuadrático Medio)
+mse_lasso_2 <- mean((predicciones_lasso_2 - y_2)^2)
+cat("MSE del modelo Lasso:", mse_lasso_2, "\n")
+
+# Calcular R-cuadrado (R^2)
+r2_lasso_2 <- 1 - sum((predicciones_lasso_2 - y_2)^2) / sum((y_2 - mean(y_2))^2)
+cat("R-cuadrado del modelo Lasso:", r2_lasso_2, "\n")
+
+```
+```{r}
+#formula
+# Obtener los coeficientes del modelo con el mejor lambda
+coeficientes_lasso_2 <- coef(modelo_lasso_2, s = "lambda.min")
+
+# Convertir los coeficientes a un data.frame
+coeficientes_lasso_2_df <- as.data.frame(as.matrix(coeficientes_lasso_2))
+coeficientes_lasso_2_df$Variable <- rownames(coeficientes_lasso_2_df)
+
+# Renombramos la columna de coeficientes para asegurarnos de que sea numérica
+colnames(coeficientes_lasso_2_df) <- c("Coeficiente", "Variable")
+
+# Asegurarnos de que los coeficientes sean numéricos (podría estar en un formato extraño)
+coeficientes_lasso_2_df$Coeficiente <- as.numeric(coeficientes_lasso_2_df$Coeficiente)
+
+# Filtrar las variables con coeficientes no nulos
+coeficientes_lasso_2_df <- coeficientes_lasso_2_df[coeficientes_lasso_2_df$Coeficiente != 0, ]
+
+cat("Ecuación de la regresión múltiple del Cluster 2:\n")
+
+# Imprimir el intercepto (si es distinto de cero)
+cat("Promedio_10_Años_GDP_PerCap =", round(coeficientes_lasso_1_df$Coeficiente[1], 2))
+
+# Imprimir el resto de la fórmula
+for (i in 2:nrow(coeficientes_lasso_2_df)) {
+  cat(" +", round(coeficientes_lasso_2_df$Coeficiente[i], 2), "*", coeficientes_lasso_2_df$Variable[i], "\n")
+}
+
+```
+
+
+#Comparación de los modelos
+```{r}
+# Filtrar las variables predictoras para Cluster 1
+X_1 <- as.matrix(df_cluster1[, c("Investment_Freedom", 
+                                 "Fiscal_Health", 
+                                 "Promedio_10_Años_Crec_pib", 
+                                 "Judicial_Effectiveness", 
+                                 "Efectividad.gobierno", 
+                                 "Cal.Regulacion", 
+                                 "Property_Rights", 
+                                 "Tax_Burden", 
+                                 "Government_Integrity", 
+                                 "Labor_Freedom", 
+                                 "Business_Freedom")])
+
+# Variable dependiente Cluster 1
+y_1 <- df_cluster1$Promedio_10_Años_GDP_PerCap
+
+# Ajustar el modelo Lasso para Cluster 1
+modelo_lasso_1 <- cv.glmnet(X_1, y_1, alpha = 1)
+
+# Imprimir el valor de lambda que minimiza el error de validación cruzada
+cat("Valor óptimo de lambda Cluster 1:", modelo_lasso_1$lambda.min, "\n")
+
+# Obtener los coeficientes del modelo con el mejor lambda para Cluster 1
+coeficientes_lasso_1 <- coef(modelo_lasso_1, s = "lambda.min")
+cat("Coeficientes del modelo Lasso con el valor óptimo de lambda para Cluster 1:\n")
+print(coeficientes_lasso_1)
+
+# Predicciones con el modelo Lasso para Cluster 1
+predicciones_lasso_1 <- predict(modelo_lasso_1, newx = X_1, s = "lambda.min")
+
+# Calcular el MSE (Error Cuadrático Medio) para Cluster 1
+mse_lasso_1 <- mean((predicciones_lasso_1 - y_1)^2)
+cat("MSE del modelo Lasso para Cluster 1:", mse_lasso_1, "\n")
+
+# Calcular R-cuadrado (R²) para Cluster 1
+r2_lasso_1 <- 1 - sum((predicciones_lasso_1 - y_1)^2) / sum((y_1 - mean(y_1))^2)
+cat("R-cuadrado del modelo Lasso para Cluster 1:", r2_lasso_1, "\n")
+
+
+# Filtrar las variables predictoras para Cluster 2
+X_2 <- as.matrix(df_cluster2[, c("Investment_Freedom", 
+                                 "Fiscal_Health", 
+                                 "Promedio_10_Años_Crec_pib", 
+                                 "Judicial_Effectiveness", 
+                                 "Efectividad.gobierno", 
+                                 "Cal.Regulacion", 
+                                 "Property_Rights", 
+                                 "Tax_Burden", 
+                                 "Government_Integrity", 
+                                 "Labor_Freedom", 
+                                 "Business_Freedom")])
+
+# Variable dependiente Cluster 2
+y_2 <- df_cluster2$Promedio_10_Años_GDP_PerCap
+
+# Ajustar el modelo Lasso para Cluster 2
+modelo_lasso_2 <- cv.glmnet(X_2, y_2, alpha = 1)
+
+# Imprimir el valor de lambda que minimiza el error de validación cruzada para Cluster 2
+cat("Valor óptimo de lambda Cluster 2:", modelo_lasso_2$lambda.min, "\n")
+
+# Obtener los coeficientes del modelo con el mejor lambda para Cluster 2
+coeficientes_lasso_2 <- coef(modelo_lasso_2, s = "lambda.min")
+cat("Coeficientes del modelo Lasso con el valor óptimo de lambda para Cluster 2:\n")
+print(coeficientes_lasso_2)
+
+# Predicciones con el modelo Lasso para Cluster 2
+predicciones_lasso_2 <- predict(modelo_lasso_2, newx = X_2, s = "lambda.min")
+
+# Calcular el MSE (Error Cuadrático Medio) para Cluster 2
+mse_lasso_2 <- mean((predicciones_lasso_2 - y_2)^2)
+cat("MSE del modelo Lasso para Cluster 2:", mse_lasso_2, "\n")
+
+# Calcular R-cuadrado (R²) para Cluster 2
+r2_lasso_2 <- 1 - sum((predicciones_lasso_2 - y_2)^2) / sum((y_2 - mean(y_2))^2)
+cat("R-cuadrado del modelo Lasso para Cluster 2:", r2_lasso_2, "\n")
+
+```
+
+```{r}
+# Filtrar y almacenar los resultados de lambda, R² y MSE por Cluster 1 y Cluster 2
+
+# Resultados para Cluster 1
+lambda_1 <- modelo_lasso_1$lambda.min
+mse_1 <- mse_lasso_1
+r2_1 <- r2_lasso_1*100
+
+# Resultados para Cluster 2
+lambda_2 <- modelo_lasso_2$lambda.min
+mse_2 <- mse_lasso_2
+r2_2 <- r2_lasso_2*100
+
+# Crear un dataframe con los resultados
+resultados_completos <- data.frame(
+  Cluster = c("Cluster 1", "Cluster 2"),
+  Lambda = c(lambda_1, lambda_2),
+  MSE = c(mse_1, mse_2),
+  R2 = c(r2_1, r2_2)
+)
+
+# Mostrar el dataframe de resultados
+print(resultados_completos)
+
+```
+
+#Con respecto a Lambda:el Cluster 1 tiene un valor de Lambda más alto (1875.299) en comparación con Cluster 2 (773.413). Lambda es un parámetro regularizador en el modelo Lasso, que penaliza los coeficientes para evitar el sobreajuste. Un valor más alto de Lambda indica una regularización más fuerte, lo que puede llevar a que el modelo haga una selección más estricta de las características importantes. El valor más alto en Cluster 1 sugiere que se ha aplicado una regularización más fuerte en este modelo.
+
+#Con respecto al error cuadrático medio (MSE): EL Cluster 1 tiene un MSE mucho más alto (196,203,733) que Cluster 2 (73,174,795). El MSE mide la diferencia entre los valores reales y los predichos. Un MSE más bajo indica un modelo que predice mejor los valores. Esto sugiere que el modelo Lasso para Cluster 2 tiene una mejor capacidad predictiva en términos de ajuste a los datos que el modelo para Cluster 1.
+
+#Con respecto al coeficiente de determinación (R2); 
+#El R² de Cluster 1 es 71.65%, lo que indica que aproximadamente el 71.65% de la variabilidad de los datos puede explicarse por el modelo Lasso
+#El R² de Cluster 2 es 57.90%, lo que indica que el modelo Lasso explica solo el 57.90% de la variabilidad de los datos en este caso. Este valor es más bajo que el de Cluster 1, lo que implica que el modelo Lasso tiene un rendimiento algo peor en Cluster 2 en cuanto a la capacidad de explicar la variabilidad de los datos.
+
+#En conclusión;
+#Cluster 1 presenta un modelo con un R² más alto (71.65%), lo que indica que, aunque el MSE es mayor, el modelo Lasso para Cluster 1 tiene un mejor ajuste general a los datos, explicando una mayor parte de la variabilidad.
+#Cluster 2, aunque tiene un MSE más bajo, también tiene un R² más bajo (57.90%), lo que sugiere que el modelo tiene una capacidad explicativa menor, aunque la precisión en términos de error cuadrático medio es mejor.
+
+#Lambda más alto en Cluster 1 sugiere que la regularización más fuerte ha afectado a este modelo, lo que puede haber llevado a un ajuste menos preciso pero más generalizado.
+
+#En resumen, el modelo Lasso para Cluster 1 es más capaz de explicar la variabilidad de los datos (mayor R²), mientras que el modelo para Cluster 2 tiene un menor MSE, lo que indica una mejor capacidad de predicción en términos de error, pero con una menor capacidad explicativa.S
+```{r}
+
+
+
+# Crear un dataframe para MSE
+resultados_mse <- data.frame(
+  Cluster = c("Cluster 1", "Cluster 2"),
+  MSE = c(mse_1, mse_2)
+)
+
+# Crear el gráfico solo para MSE con un color específico
+fig_mse <- plot_ly(resultados_mse, x = ~Cluster, y = ~MSE, type = 'bar', name = 'MSE',
+                   marker = list(color = '#de528c')) %>%
+  layout(
+    title = "Comparación de MSE por Cluster",
+    xaxis = list(title = "Cluster"),
+    yaxis = list(title = "MSE"),
+    showlegend = FALSE
+  )
+
+# Crear un dataframe para Lambda y R²
+resultados_lambda_r2 <- data.frame(
+  Cluster = c("Cluster 1", "Cluster 2"),
+  Lambda = c(lambda_1, lambda_2),
+  R2 = c(r2_1, r2_2)
+)
+
+# Reshape para Lambda y R²
+resultados_long_lambda_r2 <- reshape(resultados_lambda_r2, 
+                                     varying = c("Lambda", "R2"),
+                                     v.names = "Valor",
+                                     timevar = "Metrica",
+                                     times = c("Lambda", "R2"),
+                                     direction = "long")
+
+# Crear el gráfico para Lambda y R² con colores específicos
+fig_lambda_r2 <- plot_ly(resultados_long_lambda_r2, x = ~Cluster, y = ~Valor, color = ~Metrica, type = 'bar', 
+                         text = ~paste(Metrica, ": ", round(Valor, 2)),
+                         hoverinfo = 'text', 
+                         colors = c("Lambda" = "#8de0a6", "R2" = "#dc6378")) %>%
+  layout(
+    title = "Comparación de Lambda y R² por Cluster",
+    xaxis = list(title = "Cluster"),
+    yaxis = list(title = "Valor"),
+    barmode = 'group',  # Modo de agrupación de barras
+    showlegend = TRUE
+  )
+
+# Mostrar ambos gráficos
+fig_mse
+#fig_lambda_r2
+
+
+```
+
+```{r}
+# Crear un dataframe para MSE
+resultados_mse <- data.frame(
+  Cluster = c("Cluster 1", "Cluster 2"),
+  MSE = c(mse_1, mse_2)
+)
+
+# Crear el gráfico solo para MSE con un color específico
+fig_mse <- plot_ly(resultados_mse, x = ~Cluster, y = ~MSE, type = 'bar', name = 'MSE',
+                   marker = list(color = '#de528c')) %>%
+  layout(
+    title = "Comparación de MSE por Cluster",
+    xaxis = list(title = "Cluster"),
+    yaxis = list(title = "MSE"),
+    showlegend = FALSE
+  )
+
+# Crear un dataframe para Lambda y R²
+resultados_lambda_r2 <- data.frame(
+  Cluster = c("Cluster 1", "Cluster 2"),
+  Lambda = c(lambda_1, lambda_2),
+  R2 = c(r2_1, r2_2)
+)
+
+# Reshape para Lambda y R²
+resultados_long_lambda_r2 <- reshape(resultados_lambda_r2, 
+                                     varying = c("Lambda", "R2"),
+                                     v.names = "Valor",
+                                     timevar = "Metrica",
+                                     times = c("Lambda", "R2"),
+                                     direction = "long")
+
+# Crear el gráfico para Lambda y R² con colores específicos
+fig_lambda_r2 <- plot_ly(resultados_long_lambda_r2, x = ~Cluster, y = ~Valor, color = ~Metrica, type = 'bar', 
+                         text = ~paste(Metrica, ": ", round(Valor, 2)),
+                         hoverinfo = 'text', 
+                         colors = c("Lambda" = "#8de0a6", "R2" = "#dc6378")) %>%
+  layout(
+    title = "Comparación de Lambda y R² por Cluster",
+    xaxis = list(title = "Cluster"),
+    yaxis = list(title = "Valor"),
+    barmode = 'group',  # Modo de agrupación de barras
+    showlegend = TRUE
+  )
+
+# Mostrar ambos gráficos
+
+fig_lambda_r2
+```
+
+
+```{r}
+
+
+# Residuos para Cluster 1
+residuos_lasso_1 <- y_1 - predicciones_lasso_1
+cat("Residuos Cluster 1:\n")
+print(residuos_lasso_1)
+
+# Graficar los residuos de Cluster 1 usando Plotly
+grafico_residuos_1 <- plot_ly(x = seq_along(residuos_lasso_1), y = residuos_lasso_1, 
+                              type = 'scatter', mode = 'markers', 
+                              marker = list(color = '#8359ed', size = 6),  # Cambiar a color azul
+                              name = "Residuos Cluster 1") %>%
+  add_trace(x = seq_along(residuos_lasso_1), y = rep(0, length(residuos_lasso_1)),
+            type = 'scatter', mode = 'lines', 
+            line = list(color = '#f90050', width = 4),  # Cambiar a línea roja
+            name = "Línea de referencia 0") %>%
+  layout(title = "Residuos del modelo Lasso para Cluster 1",
+         xaxis = list(title = "Observación"),
+         yaxis = list(title = "Residuo"),
+         showlegend = TRUE)
+
+# Residuos para Cluster 2
+residuos_lasso_2 <- y_2 - predicciones_lasso_2
+cat("Residuos Cluster 2:\n")
+print(residuos_lasso_2)
+
+# Graficar los residuos de Cluster 2 usando Plotly
+grafico_residuos_2 <- plot_ly(x = seq_along(residuos_lasso_2), y = residuos_lasso_2, 
+                              type = 'scatter', mode = 'markers', 
+                              marker = list(color = '#8de0a6', size = 6),  
+                              name = "Residuos Cluster 2") %>%
+  add_trace(x = seq_along(residuos_lasso_2), y = rep(0, length(residuos_lasso_2)),
+            type = 'scatter', mode = 'lines', 
+            line = list(color = '#d6496c', width = 4),  # Línea roja
+            name = "Línea de referencia 0") %>%
+  layout(title = "Residuos del modelo Lasso para Cluster 2",
+         xaxis = list(title = "Observación"),
+         yaxis = list(title = "Residuo"),
+         showlegend = TRUE)
+
+# Mostrar ambos gráficos
+grafico_residuos_1
+grafico_residuos_2
+
+
+
+```
+
+
+
+```{r}
+
+# Predicciones para el Cluster 1
+predicciones_cluster1 <- predict(modelo_lasso_1, newx = X_1, s = "lambda.min")
+
+# Predicciones para el Cluster 2
+predicciones_cluster2 <- predict(modelo_lasso_2, newx = X_2, s = "lambda.min")
+
+# Verifica las longitudes de las predicciones y los datos
+cat("Longitud de las predicciones Cluster 1:", length(predicciones_cluster1), "\n")
+cat("Longitud de las predicciones Cluster 2:", length(predicciones_cluster2), "\n")
+
+# Si las longitudes no coinciden, asegúrate de que las predicciones se ajusten a los datos correctos de cada cluster
+# Combina las predicciones y la variable 'Cluster' en un único dataframe
+# Asegúrate de usar la longitud correcta para cada cluster
+
+df_comparacion <- data.frame(
+  Cluster = c(rep("Cluster 1", length(predicciones_cluster1)), rep("Cluster 2", length(predicciones_cluster2))),
+  Predicciones = c(predicciones_cluster1, predicciones_cluster2)
+)
+
+# Ahora puedes generar el gráfico de comparación con Plotly
+
+
+graf_pred <- plot_ly(df_comparacion, 
+        x = ~Cluster, 
+        y = ~Predicciones, 
+        type = "box", 
+        color = ~Cluster,
+        colors = c("#d6496c", "#2ca02c"), 
+        boxmean = "sd") %>%
+  layout(title = "Comparación de Predicciones entre Modelos (Lasso)",
+         xaxis = list(title = "Cluster"),
+         yaxis = list(title = "Predicciones (GDP per Capita)"))
+
+
+graf_pred
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#Se probararán modelos obtenidos con valores de los indicadores en 4 escenarios posibles(muy bajo, bajo, medio y alto)
+
+```{r}
+# Predicción del pib per capita con cambios en los valores de los indicadores
+
+# Datos para hacer las predicciones (Escenarios)
+datos_varios <- data.frame(
+  Fiscal_Health = c(40, 50, 65, 80),
+  Judicial_Effectiveness = c(20, 40, 60, 75),
+  Monetary_Freedom = c(30, 40, 70, 60),
+  Financial_Freedom = c(45, 75, 85, 50),
+  Property_Rights = c(40, 55, 65, 75),
+  Tax_Burden = c(15, 20, 30, 45),
+  Business_Freedom = c(30, 40, 50, 75),
+  Trade_Freedom = c(40, 50, 60, 75),
+  Government_Integrity = c(40, 50, 60, 80),
+  Government_Spending = c(35, 45, 60, 75),
+  Labor_Freedom = c(30, 50, 65, 80),
+  Investment_Freedom = c(40, 50, 60, 85),
+  Efectividad.gobierno = c(0.3, 1.1, 1.5, 3),
+  Cal.Regulacion = c(-2, 1, 1.5, 2.5),
+  Promedio_10_Años_Crec_pib = c(1, 1.5, 2, 3.5),
+  Overall_score = c(20, 40, 60, 79)
+)
+
+# Asegúrarse de que las columnas estén en el mismo orden que en el modelo Lasso
+orden_columnas <- c("Investment_Freedom", "Fiscal_Health", "Promedio_10_Años_Crec_pib", 
+                    "Judicial_Effectiveness", "Efectividad.gobierno", "Cal.Regulacion", 
+                    "Property_Rights", "Tax_Burden", "Government_Integrity", 
+                    "Labor_Freedom", "Business_Freedom")
+
+# Reorganizar las columnas para que coincidan con el orden que espera el modelo
+datos_varios <- datos_varios[, orden_columnas]
+
+# Convertir los datos a una matriz (asegúrate de excluir la variable dependiente)
+X_varios <- as.matrix(datos_varios)
+
+# Realizar las predicciones con el modelo Lasso ajustado para Cluster 1 y Cluster 2
+predicciones_lasso_cluster1 <- predict(modelo_lasso_1, newx = X_varios, s = "lambda.min")
+predicciones_lasso_cluster2 <- predict(modelo_lasso_2, newx = X_varios, s = "lambda.min")
+
+# Crear un data frame con las predicciones y los escenarios
+predicciones_comb <- data.frame(
+  Escenario = c("Escenario 1", "Escenario 2", "Escenario 3", "Escenario 4"),
+  Predicciones_Lasso_Cluster1 = as.vector(predicciones_lasso_cluster1), # Convertir a vector para evitar problemas de tipo
+  Predicciones_Lasso_Cluster2 = as.vector(predicciones_lasso_cluster2)  # Convertir a vector para evitar problemas de tipo
+)
+
+# Imprimir las predicciones combinadas para observar cómo el PIB per cápita cambia
+print(predicciones_comb)
+
+# Crear gráfico interactivo con Plotly
+grafico_comparativo <- plot_ly(data = predicciones_comb, x = ~Escenario) %>%
+  add_trace(
+    y = ~Predicciones_Lasso_Cluster1,
+    name = "Cluster 1",
+    type = 'bar',
+    marker = list(color = '#d6496c')
+  ) %>%
+  add_trace(
+    y = ~Predicciones_Lasso_Cluster2,
+    name = "Cluster 2",
+    type = 'bar',
+    marker = list(color = '#2ca02c')
+  ) %>%
+  layout(
+    title = "Comparación de Predicciones de PIB per Cápita por Cluster",
+    xaxis = list(title = "Escenarios"),
+    yaxis = list(title = "Predicción de PIB per Cápita"),
+    barmode = 'group',  # Pone las barras lado a lado
+    legend = list(x = 0.1, y = 0.9)
+  )
+
+# Mostrar el gráfico
+grafico_comparativo
+
+
+
+```
+
+
+
+
+
+#Como conclusión con valores bajos lo afecta más al cluster 1, a medida que mejoran los valores de las variables analizadas se van separando los resultados y mejoran los resultados del cluster 1 donde se encuentran los países con score medio-alto. Pero la ecuación del modelo 2 tiene menos variables.
+
+==============================================================================
+
+#Por último se hará un análisis de costo beneficio planteando un modelo de inversión 
+#Soloa a modo de ejemplo y con datos ficticios
+
+**Inversión prevista de 10.000 millones  de dolares que se amortizará en 5 años a una taza de descuento del 3%  y se analizará como puede incidir en cada cluster teniendo en cuenta algunos de sus indicadores como nivel de impuestos y comportamiento fiscal, es solo un ejemplo **
+
+
+
+
+```{r}
+
+# Definir los parámetros constantes para el modelo
+costo_inicial <- 5000  # En millones
+tasa_descuento <- 0.03  # Tasa de descuento
+costo_recurrente <- 300  # Costo recurrente
+ingreso_anual_bruto <- 500  # Millones agregado recientemente
+anos <- 5  # Proyecto de 5 años
+ 
+# Función para calcular el valor neto  por cluster para ver si se recupera la inversión
+calcular_valor_neto <- function(costo_inicial, costo_recurrente, ingreso_anual_bruto, 
+                                beneficio_incremento_pib, tasa_descuento, anos) {
+  # Ajustar los costos y beneficios con base en la fiscalidad y gobernanza
+  # (si no es necesario un ajuste, puedes omitir esta parte)
+  costo_ajustado <- costo_recurrente  # Si hay ajustes fiscales u otros, se pueden agregar aquí.
+  
+  # Ajuste de beneficio en función del crecimiento del PIB
+  beneficio_ajustado <- ingreso_anual_bruto * beneficio_incremento_pib
+  
+  # Calcular los costos y beneficios descontados
+  costos_desc <- costo_ajustado * sum(1 / (1 + tasa_descuento)^(1:anos))  # Costos descontados
+  beneficios_desc <- sum(beneficio_ajustado / (1 + tasa_descuento)^(1:anos))  # Beneficios descontados
+  
+  # Calcular el valor neto
+  valor_neto <- beneficios_desc - costos_desc
+  return(valor_neto)
+}
+
+# Agrupar los datos por cluster y calcular el valor neto ajustado por cada uno
+resultados_cluster <- datos_clustering_nuevo %>%
+  group_by(Cluster) %>%
+  summarise(
+    valor_neto_cluster = calcular_valor_neto(
+      costo_inicial = costo_inicial,
+      ingreso_anual_bruto = ingreso_anual_bruto,
+      costo_recurrente = costo_recurrente,
+      beneficio_incremento_pib = mean(Promedio_10_Años_Crec_pib, na.rm = TRUE),  # Ajuste del crecimiento del PIB
+      tasa_descuento = tasa_descuento,
+      anos = anos
+    )
+  )
+
+# Imprimir resultados
+print(resultados_cluster)
+
+
+```
+
+
+
+```{r}
+# Crear el gráfico con plotly
+grafico_cluster <- resultados_cluster %>%
+  plot_ly(
+    x = ~Cluster, 
+    y = ~valor_neto_cluster, 
+    type = 'bar', 
+    name = 'Valor Neto',
+    marker = list(color = c('#d6496c', '#2ca02c'))  # Corregido "mmarker" a "marker"
+  ) %>%
+  layout(
+    title = "Valor Neto por Cluster",
+    xaxis = list(title = "Cluster"),
+    yaxis = list(title = "Valor Neto (millones)"),
+    barmode = 'group'
+  )
+
+# Mostrar el gráfico
+grafico_cluster
+
+
+
+```
+
+
+
+
+
+```{r}
+# Definir los parámetros constantes para el modelo
+costo_inicial <- 5000  # En millones
+tasa_descuento <- 0.03  # Tasa de descuento
+costo_recurrente <- 300  # Costo recurrente
+ingreso_anual_bruto <- 500 # Millones agregado recientemente
+anos <- 5  # Proyecto de 5 años
+
+# Función para calcular el valor neto ajustado por cluster para recuperar la inversión
+calcular_valor_neto_ajustado <- function(costo_inicial, costo_recurrente, ingreso_anual_bruto, 
+                                          beneficio_incremento_pib, tasa_descuento, anos, fiscal_salud, gobernanza) {
+  # Ajustar los costos y beneficios con base en la fiscalidad y gobernanza
+  costo_ajustado <- costo_recurrente * (1 + fiscal_salud * 0.1)  # Ajuste del costo según la salud fiscal
+  beneficio_ajustado <- ingreso_anual_bruto * beneficio_incremento_pib * (1 + gobernanza * 0.1)  # Ajuste del beneficio según la efectividad del gobierno
+  
+  # Calcular los costos y beneficios descontados, manejando NA's si existen
+  costos_desc <- costo_inicial + sum(costo_ajustado / (1 + tasa_descuento)^(1:anos), na.rm = TRUE)
+  beneficios_desc <- sum(beneficio_ajustado / (1 + tasa_descuento)^(1:anos), na.rm = TRUE)
+  
+  # Calcular el valor neto
+  valor_neto_ajustado <- beneficios_desc - costos_desc
+  return(valor_neto_ajustado)
+}
+
+# Agrupar los datos por cluster y calcular el valor neto ajustado por cada uno
+resultados_cluster_ajustado <- datos_clustering_nuevo %>%
+  group_by(Cluster) %>%
+  summarise(
+    valor_neto_cluster = calcular_valor_neto_ajustado(
+      costo_inicial = costo_inicial,
+      ingreso_anual_bruto = ingreso_anual_bruto,
+      costo_recurrente = mean(Tax_Burden),  # Usamos el Tax_Burden para ajustar el costo
+      beneficio_incremento_pib = mean(Promedio_10_Años_Crec_pib ),  # Convertimos a porcentaje
+      tasa_descuento = tasa_descuento,
+      anos = anos,
+      fiscal_salud = mean(Fiscal_Health),  # Ajustamos con la salud fiscal
+      gobernanza = mean(Government_Integrity)  # Ajustamos con la efectividad del gobierno
+    )
+  )
+
+# Imprimir resultados
+print(resultados_cluster_ajustado)
+
+
+```
+
+
+
+```{r}
+grafico_cluster_ajustado <- plot_ly(
+  data = resultados_cluster_ajustado,
+  x = ~Cluster,
+  y = ~valor_neto_cluster,
+  type = "bar",
+  marker = list(color = c('#d6496c', '#2ca02c'))  # Personaliza los colores
+) %>%
+  layout(
+    title = "Valor Neto Ajustado por Cluster",
+    xaxis = list(title = "Cluster"),
+    yaxis = list(title = "Valor Neto Ajustado")
+  )
+
+grafico_cluster_ajustado
+
+
+```
+
+
+```{r}
+# Datos para el gráfico 3d
+datos_grafico <- resultados_cluster_ajustado %>%
+  left_join(datos_clustering_nuevo, by = "Cluster") %>%  # Unir para obtener todas las variables relevantes
+  select(Cluster, valor_neto_cluster, Tax_Burden, Fiscal_Health)  # Seleccionar las columnas necesarias
+
+# Crear el gráfico 3D usando plotly
+grafico_3d <- plot_ly(
+  data = datos_grafico,
+  x = ~Tax_Burden,  # Eje X: Tax Burden
+  y = ~Fiscal_Health,  # Eje Y: Salud Fiscal
+  z = ~valor_neto_cluster,  # Eje Z: Valor Neto Ajustado
+  color = ~Cluster,  # Colorear por Cluster
+  colors = c('#d6496c', '#2ca02c'),  # Colores para los clusters
+  type = "scatter3d",  # Tipo de gráfico 3D
+  mode = "markers",  # Mostrar los puntos
+  marker = list(size = 5)  # Tamaño de los puntos
+) %>%
+  layout(
+    title = "Análisis 3D por Cluster",
+    scene = list(
+      xaxis = list(title = "Tax Burden"),
+      yaxis = list(title = "Fiscal Health"),
+      zaxis = list(title = "Valor Neto Ajustado")
+    )
+  )
+
+# Mostrar el gráfico 3D
+grafico_3d
+```
+
+
+#Definir escenarios  con cambios de costos recurrentes por ejemplo materias primas teniendo en cuenta el modelo ajustado
+
+#Escenario 1: Costo recurrente reducido en un 10%.
+#Escenario 2: Costo recurrente sin cambios.
+#Escenario 3: Costo recurrente aumentado en un 40%.
+
+
+
+#Escenario de costos
+```{r}
+
+
+# Función para calcular el valor neto ajustado por cluster
+calcular_valor_neto_ajustado <- function(costo_inicial, costo_recurrente, beneficio_incremento_pib, tasa_descuento, anos, fiscal_salud, gobernanza, ingreso_anual_bruto) {
+  # Ajuste del costo y beneficio según fiscalidad y gobernanza
+  costo_ajustado <- costo_recurrente * (1 + fiscal_salud * 0.03)  # Ajuste del costo a un valor moderado
+  beneficio_ajustado <- ingreso_anual_bruto * beneficio_incremento_pib * (1 + gobernanza * 0.03)  # Ajuste del beneficio a un valor moderado
+  
+  # Calcular los costos y beneficios descontados usando la fórmula de valor presente
+  costos_desc <- costo_inicial + sum(costo_ajustado / (1 + tasa_descuento)^(1:anos))
+  beneficios_desc <- sum(beneficio_ajustado / (1 + tasa_descuento)^(1:anos))
+  
+  # Calcular el valor neto ajustado
+  valor_neto_ajustado <- beneficios_desc - costos_desc
+  return(valor_neto_ajustado)
+}
+
+# Probar tres escenarios con diferentes costos recurrentes (reducidos, originales y aumentados)
+escenarios_costos <- data.frame(
+  escenario = c("Costo +10%", "Costo +20%", "Costo +40%"),
+  costo_recurrente_modificado = c(1.1, 1.2, 1.4),  # Reducir, mantener o aumentar el costo recurrente
+  stringsAsFactors = FALSE
+)
+
+# Inicializar un dataframe para los resultados
+resultados_costos <- data.frame(
+  escenario = character(),
+  valor_neto_ajustado = numeric(),
+  cluster = integer(),
+  stringsAsFactors = FALSE
+)
+
+# Recorrer los clusters y escenarios con los ajustes de costos
+for (cluster_id in unique(datos_clustering_nuevo$Cluster)) {
+  cluster_data <- datos_clustering_nuevo[datos_clustering_nuevo$Cluster == cluster_id, ]
+  
+  for (i in 1:nrow(escenarios_costos)) {
+    # Ajustar el costo recurrente según el escenario
+    costo_recurrente_ajustado <- mean(cluster_data$Tax_Burden) * escenarios_costos$costo_recurrente_modificado[i]
+    
+    # Calcular el valor neto ajustado para el escenario
+    valor_neto <- calcular_valor_neto_ajustado(
+      costo_inicial = 5000 ,  # Costo inicial fijo
+      costo_recurrente = costo_recurrente_ajustado, 
+      ingreso_anual_bruto =  ingreso_anual_bruto,
+      beneficio_incremento_pib = mean(cluster_data$Promedio_10_Años_Crec_pib),  # Crecimiento PIB
+      tasa_descuento = 0.03,  # Tasa de descuento fija
+      anos = 5,
+      fiscal_salud = mean(cluster_data$Fiscal_Health),
+      gobernanza = mean(cluster_data$Government_Integrity)
+    )
+    
+    # Almacenar los resultados
+    resultados_costos <- rbind(resultados_costos, data.frame(
+      escenario = escenarios_costos$escenario[i],
+      valor_neto_ajustado = valor_neto,
+      cluster = cluster_id
+    ))
+  }
+}
+
+# Asegurarse de que la columna Cluster sea un factor para el gráfico
+resultados_costos$cluster <- factor(resultados_costos$cluster)
+
+# Visualizar los resultados ajustados por escenario y cluster
+grafico_costos <- plot_ly(
+  data = resultados_costos,
+  x = ~escenario,  # Eje X: Escenarios
+  y = ~valor_neto_ajustado,  # Eje Y: Valor Neto Ajustado
+  color = ~cluster,  # Colorear por Cluster
+  colors = c('#d6496c', '#2ca02c'),  # Usar más colores si tienes más de dos clusters
+  type = "bar",  # Tipo de gráfico (barras)
+  text = ~paste("Valor Neto: ", round(valor_neto_ajustado, 2)),
+  hoverinfo = "text"  # Mostrar el valor neto al pasar el ratón
+) %>%
+  layout(
+    title = "Valor Neto Ajustado por Escenario de Costo y Cluster",
+    xaxis = list(title = "Escenario de Costo"),
+    yaxis = list(title = "Valor Neto Ajustado"),
+    legend = list(title = list(text = 'Cluster')),
+    barmode = "group",  # Agrupar las barras por escenario y cluster
+    showlegend = TRUE
+  )
+
+# Mostrar el gráfico
+grafico_costos
+
+
+```
+
+#Calcular la tasa interna del proyecto(tir)
+```{r}
+
+# Ajuste de los parámetros de entrada, usando escalas más pequeñas si es necesario
+calcular_vpn <- function(tasa, costo_inicial, costo_recurrente, beneficio_incremento_pib, anos, fiscal_salud, gobernanza, ingreso_anual_bruto) {
+  # Ajuste de los costos y beneficios
+  costo_ajustado <- costo_recurrente * (1 + fiscal_salud * 0.1)
+  beneficio_ajustado <- ingreso_anual_bruto * beneficio_incremento_pib * (1 + gobernanza * 0.1)
+  
+  # Verificación de los costos y beneficios
+  print(paste("Costo ajustado: ", costo_ajustado))
+  print(paste("Beneficio ajustado: ", beneficio_ajustado))
+  
+  # Calcular los costos y beneficios descontados para cada año
+  costos_desc <- costo_inicial + sum(sapply(1:anos, function(a) costo_ajustado / (1 + tasa)^a))
+  beneficios_desc <- sum(sapply(1:anos, function(a) beneficio_ajustado / (1 + tasa)^a))
+  
+  # Calcular el VPN
+  vpn <- beneficios_desc - costos_desc
+  return(vpn)
+}
+
+# Función para calcular la TIR por cluster
+calcular_tir <- function(costo_inicial, costo_recurrente, beneficio_incremento_pib, fiscal_salud, gobernanza, ingreso_anual_bruto) {
+  tir_funcion <- function(tasa) {
+    return(calcular_vpn(tasa, costo_inicial, costo_recurrente, beneficio_incremento_pib, anos = 5, fiscal_salud, gobernanza, ingreso_anual_bruto))
+  }
+
+  # Comprobación de valores en los extremos del intervalo
+  vpn_inicial <- tir_funcion(0)  # VPN en tasa = 0
+  vpn_final <- tir_funcion(100)  # Ampliamos el intervalo hasta 1000
+  
+  # Verificar si hay cruce de signos
+  print(paste("VPN en tasa 0: ", vpn_inicial))
+  print(paste("VPN en tasa 1000: ", vpn_final))
+  
+  if (sign(vpn_inicial) == sign(vpn_final)) {
+    message("No hay cruce de signos en el intervalo de 0 a 1000.")
+    return(NA)  # Si no hay cruce de signos, no tiene sentido calcular la TIR
+  }
+  
+  # Intentar calcular la TIR
+  resultado <- tryCatch({
+    uniroot(tir_funcion, c(0, 1000))  # Intervalo entre 0 y 1000
+  }, error = function(e) {
+    message(paste("Error calculando TIR:", e$message))
+    return(NA)  # Si hay error, devolver NA
+  })
+  
+  if (!is.null(resultado)) {
+    return(resultado$root)  # Retornar la TIR
+  } else {
+    return(NA)  # En caso de error
+  }
+}
+
+# Función para calcular TIR por cluster
+calcular_tir_por_cluster <- function(data) {
+  # Verificar que el dataframe contiene las columnas necesarias
+  if (!all(c("Cluster", "Tax_Burden", "Promedio_10_Años_Crec_pib", "Fiscal_Health", "Government_Integrity", "Overall_score") %in% colnames(data))) {
+    stop("El dataframe 'data' no tiene todas las columnas necesarias.")
+  }
+  
+  # Calcular la TIR para cada cluster
+  resultados_cluster <- data %>%
+    group_by(Cluster) %>%
+    mutate(
+      tir_cluster = calcular_tir(
+        costo_inicial = 5000,  # Costo inicial
+        costo_recurrente = mean(Tax_Burden, na.rm = TRUE),  # Promedio de carga tributaria
+        beneficio_incremento_pib = mean(Promedio_10_Años_Crec_pib * 10, na.rm = TRUE),  # Promedio de crecimiento del PIB
+        fiscal_salud = mean(Fiscal_Health, na.rm = TRUE),  # Promedio de salud fiscal
+        gobernanza = mean(Government_Integrity, na.rm = TRUE),  # Promedio de gobernanza
+        ingreso_anual_bruto = mean(Overall_score, na.rm = TRUE)  # Promedio de ingresos anuales
+      )
+    ) %>%
+    summarise(tir_cluster = mean(tir_cluster, na.rm = TRUE))  # Resumir el resultado por cluster
+  
+  return(resultados_cluster)
+}
+
+# Verifica el contenido de los resultados
+resultados_cluster <- calcular_tir_por_cluster(datos_clustering_nuevo)
+print(resultados_cluster)
+
+
+```
+
+
+
+```{r}
+
+
+# Función para calcular VPN (Valor Presente Neto)
+calcular_vpn <- function(tasa, costo_inicial, costo_recurrente, beneficio_incremento_pib, anos, fiscal_salud, gobernanza, ingreso_anual_bruto) {
+  costo_ajustado <- costo_recurrente * (1 + fiscal_salud * 0.1)
+  beneficio_ajustado <- ingreso_anual_bruto * beneficio_incremento_pib * (1 + gobernanza * 0.1)
+  
+  costos_desc <- costo_inicial + sum(sapply(1:anos, function(a) costo_ajustado / (1 + tasa)^a))
+  beneficios_desc <- sum(sapply(1:anos, function(a) beneficio_ajustado / (1 + tasa)^a))
+  
+  vpn <- beneficios_desc - costos_desc
+  return(vpn)
+}
+
+# Función para calcular la TIR por cluster
+calcular_tir <- function(costo_inicial, costo_recurrente, beneficio_incremento_pib, fiscal_salud, gobernanza, ingreso_anual_bruto) {
+  tir_funcion <- function(tasa) {
+    return(calcular_vpn(tasa, costo_inicial, costo_recurrente, beneficio_incremento_pib, anos = 5, fiscal_salud, gobernanza, ingreso_anual_bruto))
+  }
+
+  vpn_inicial <- tir_funcion(0)  # VPN en tasa = 0
+  vpn_final <- tir_funcion(100)  # VPN en tasa = 100
+  
+  if (sign(vpn_inicial) == sign(vpn_final)) {
+    message("No hay cruce de signos en el intervalo de 0 a 100.")
+    return(NA)  # Si no hay cruce de signos, no tiene sentido calcular la TIR
+  }
+  
+  resultado <- tryCatch({
+    uniroot(tir_funcion, c(0, 100))  # Intervalo entre 0 y 100
+  }, error = function(e) {
+    message(paste("Error calculando TIR:", e$message))
+    return(NA)  # Si hay error, devolver NA
+  })
+  
+  if (!is.null(resultado)) {
+    return(resultado$root)  # Retornar la TIR
+  } else {
+    return(NA)  # En caso de error
+  }
+}
+
+# Función para calcular la TIR por cluster
+calcular_tir_por_cluster <- function(data) {
+ 
+  if (!all(c("Cluster", "Tax_Burden", "Promedio_10_Años_Crec_pib", "Fiscal_Health", "Government_Integrity", "Overall_score") %in% colnames(data))) {
+    stop("El dataframe 'data' no tiene todas las columnas necesarias.")
+  }
+
+  # Calcular la TIR para cada cluster
+  resultados_cluster <- data %>%
+    group_by(Cluster) %>%
+    summarise(
+      tir_cluster = calcular_tir(
+        costo_inicial = 5000,  # Costo inicial
+        costo_recurrente = mean(Tax_Burden, na.rm = TRUE),  # Promedio de carga tributaria
+        beneficio_incremento_pib = mean(Promedio_10_Años_Crec_pib * 10, na.rm = TRUE),  # Promedio de crecimiento del PIB
+        fiscal_salud = mean(Fiscal_Health, na.rm = TRUE),  # Promedio de salud fiscal
+        gobernanza = mean(Government_Integrity, na.rm = TRUE),  # Promedio de gobernanza
+        ingreso_anual_bruto = mean(Overall_score, na.rm = TRUE)  # Promedio de ingresos anuales
+      )
+    )
+  
+  return(resultados_cluster)
+}
+
+# Impresión
+resultados_cluster <- calcular_tir_por_cluster(datos_clustering_nuevo)
+print(resultados_cluster)
+
+```
+```{r}
+
+
+# Colores definidos
+colores <- c('#d6496c', '#2ca02c')
+
+# Crear el gráfico de barras para visualizar la TIR por Cluster
+plot_tir <- ggplot(resultados_cluster, aes(x = Cluster, y = tir_cluster, fill = Cluster)) +
+  geom_bar(stat = "identity") +  # Usamos barras para visualizar las TIR
+  scale_fill_manual(values = colores) +  # Aplicamos los colores definidos
+  theme_minimal() +  # Estilo limpio
+  labs(
+    title = "TIR por Cluster", 
+    x = "Cluster", 
+    y = "TIR"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Giramos las etiquetas del eje X si es necesario
+
+# Convertir a gráfico interactivo con plotly
+ggplotly(plot_tir)
+
+
+```
+
+
+```{r}
+# Definir las tasas de descuento
+# Parámetros constantes para el modelo
+costo_inicial <- 5000  # En millones
+costo_recurrente <- 300  # Costo recurrente
+ingreso_anual_bruto <- 500  # Millones agregado recientemente
+anos <- 5  # Proyecto de 5 años
+
+tasas_descuento <- c(0.01, 0.03, 0.05, 0.07, 0.09, 0.1)
+
+# Definir el número de años para el análisis
+anos <- 5
+
+# Definir el costo inicial
+costo_inicial <- 5000  # Asegúrate de definirlo o adaptarlo a tu caso
+
+# Crear un data frame vacío para almacenar los resultados
+resultados <- data.frame(Cluster = integer(),
+                         Tasa_Descuento = numeric(),
+                         Beneficio_Descontado = numeric(),
+                         Costo_Descontado = numeric(),
+                         Valor_Neto = numeric())
+
+# Realizar el análisis de sensibilidad por cluster
+for (cluster_id in unique(datos_clustering_nuevo$Cluster)) {
+  
+  # Filtrar los datos para el cluster específico
+  cluster_data <- datos_clustering_nuevo[datos_clustering_nuevo$Cluster == cluster_id, ]
+  
+  # Promedio de las variables para el cluster
+  beneficio_incremento_pib <- mean(cluster_data$Promedio_10_Años_Crec_pib)  # Crecimiento PIB (ya en porcentaje)
+  costo_recurrente <- mean(cluster_data$Tax_Burden)
+  
+  # Calcular los valores netos por tasas de descuento
+  for (tasa in tasas_descuento) {
+    
+    # Calcular el beneficio descontado (ajustado por tasa de descuento)
+    beneficios_desc <- sum(ingreso_anual_bruto * beneficio_incremento_pib / (1 + tasa)^(1:anos))
+    
+    # Calcular los costos descontados (ajustados por tasa de descuento)
+    costos_desc <- costo_inicial + sum(costo_recurrente / (1 + tasa)^(1:anos))
+    
+    # Calcular el valor neto
+    valor_neto <- beneficios_desc - costos_desc
+    
+    # Almacenar los resultados en el data frame
+    resultados <- rbind(resultados, data.frame(Cluster = cluster_id, 
+                                               Tasa_Descuento = tasa, 
+                                               Beneficio_Descontado = beneficios_desc, 
+                                               Costo_Descontado = costos_desc, 
+                                               Valor_Neto = valor_neto))
+  }
+}
+
+# Ver los resultados organizados por cluster y tasa de descuento
+print(resultados)
+
+
+```
+
+```{r}
+
+
+# Crear un gráfico interactivo con plotly
+grafico_tasa_descuento <- plot_ly(data = resultados, 
+                               x = ~Tasa_Descuento,  # Usar el nombre correcto de la columna
+                               y = ~Valor_Neto,      # Usar el nombre correcto de la columna
+                               color = ~factor(Cluster),  # Usar el nombre correcto de la columna
+                               type = 'scatter', 
+                               mode = 'lines+markers',
+                               line = list(width = 2),
+                               marker = list(size = 8),
+                               colors = c('#d6496c', '#2ca02c')) %>%  # Colores explícitos por cluster
+  layout(title = "Análisis de Sensibilidad por Cluster",
+         xaxis = list(title = "Tasa de Descuento"),
+         yaxis = list(title = "Valor Presente Neto"),
+         showlegend = TRUE)
+
+# Mostrar el gráfico interactivo
+grafico_tasa_descuento
+
+
+
+```
+
+`
+
+
+```{r}
+
+
+# Crear un gráfico interactivo con plotly
+grafico_tasa_descuento <- plot_ly(data = resultados, 
+                                  x = ~Tasa_Descuento,  # Usar el nombre correcto de la columna
+                                  y = ~Valor_Neto,      # Usar el nombre correcto de la columna
+                                  color = ~factor(Cluster),  # Colorear según el cluster
+                                  type = 'scatter', 
+                                  mode = 'lines+markers',
+                                  line = list(width = 2),
+                                  marker = list(size = 6),  # Tamaño de los puntos
+                                  colors = RColorBrewer::brewer.pal(n = length(unique(resultados$Cluster)), "Set1")) %>%  # Colores dinámicos para clusters
+  layout(title = "Análisis de Sensibilidad por Cluster",
+         xaxis = list(title = "Tasa de Descuento", tickmode = "array"),
+         yaxis = list(title = "Valor Presente Neto"),
+         showlegend = TRUE)
+
+# Mostrar el gráfico interactivo
+grafico_tasa_descuento
+
+```
+
+
+
+#Shiny interacivo
+```{r}
+# Función para calcular el valor neto ajustado para cada cluster
+calcular_valor_neto_ajustado <- function(costo_inicial, costo_recurrente, beneficio_incremento_pib, tasa_descuento, anos, fiscal_salud, gobernanza, ingreso_anual_bruto) {
+  
+  # Ajustar los costos y beneficios con base en la fiscalidad y gobernanza
+  costo_ajustado <- costo_recurrente * (1 + fiscal_salud * 0.1)  # Ajuste del costo según la salud fiscal
+  beneficio_ajustado <- ingreso_anual_bruto*beneficio_incremento_pib * (1 + gobernanza * 0.1)  # Ajuste del beneficio según la efectividad del gobierno
+  
+  # Incorporar el ingreso anual neto ajustado
+  beneficio_ajustado <- beneficio_ajustado + ingreso_anual_bruto  # Ajustar beneficio con el ingreso anual neto
+  
+  # Cálculo de los costos y beneficios descontados
+  costos_desc <- costo_inicial + sum(costo_ajustado / (1 + tasa_descuento)^(1:anos))
+  beneficios_desc <- sum(beneficio_ajustado / (1 + tasa_descuento)^(1:anos))
+  
+  # Calcular el valor neto
+  valor_neto <- beneficios_desc - costos_desc
+  return(list(valor_neto = valor_neto, costos_desc = costos_desc, beneficios_desc = beneficios_desc))
+}
+
+# Definir los valores fijos para beneficio, fiscalidad y gobernanza de cada cluster
+beneficio_pib_cluster_1 <- 20000  # Beneficio para Cluster 1
+fiscalidad_cluster_1 <- 0.5  # Fiscalidad para Cluster 1
+gobernanza_cluster_1 <- 0.7  # Gobernanza para Cluster 1
+
+beneficio_pib_cluster_2 <- 30000  # Beneficio para Cluster 2
+fiscalidad_cluster_2 <- 0.4  # Fiscalidad para Cluster 2
+gobernanza_cluster_2 <- 0.6  # Gobernanza para Cluster 2
+
+# Interfaz de usuario
+ui <- fluidPage(
+  titlePanel("Cálculo de Valor Neto Ajustado por Cluster"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      sliderInput("costo_inicial", "Costo Inicial:", min = 5000, max = 100000, value = 10000, step = 10000),
+      sliderInput("costo_recurrente", "Costo Recurrente:", min = 5000, max = 50000, value = 5000, step = 1000),
+      sliderInput("tasa_descuento", "Tasa de Descuento:", min = 0.01, max = 0.2, value = 0.05, step = 0.01),
+      sliderInput("ingreso_anual_bruto", "Ingreso Anual Bruto:", min = 0, max = 50000, value = 12000, step = 1000),  
+      selectInput("anos", "Número de Años:", choices = c(5, 10, 15, 20, 25, 30, 35, 40, 45, 50), selected = 2),
+      actionButton("calcular", "Calcular")
+    ),
+    
+    mainPanel(
+      textOutput("valor_neto_cluster_1"),
+      textOutput("valor_neto_cluster_2"),
+      plotlyOutput("grafico_cluster_1"),
+      plotlyOutput("grafico_cluster_2")
+    )
+  )
+)
+
+# Lógica del servidor
+# Lógica del servidor
+server <- function(input, output) {
+  
+  # Crear un evento reactivo para cuando el botón "Calcular" es presionado
+  observeEvent(input$calcular, {
+    # Calcular el valor neto para ambos clusters
+    resultado_cluster_1 <- calcular_valor_neto_ajustado(
+      input$costo_inicial,
+      input$costo_recurrente,
+      beneficio_pib_cluster_1,
+      input$tasa_descuento,
+      input$anos,
+      fiscalidad_cluster_1,
+      gobernanza_cluster_1,
+      input$ingreso_anual_bruto  # Ingresos netos desde el slider
+    )
+    
+    resultado_cluster_2 <- calcular_valor_neto_ajustado(
+      input$costo_inicial,
+      input$costo_recurrente,
+      beneficio_pib_cluster_2,
+      input$tasa_descuento,
+      input$anos,
+      fiscalidad_cluster_2,
+      gobernanza_cluster_2,
+      input$ingreso_anual_bruto  # Ingresos netos desde el slider
+    )
+    
+    # Mostrar los resultados de valor neto ajustado
+    output$valor_neto_cluster_1 <- renderText({
+      paste("El Valor Neto Ajustado para el Cluster 1 es: $", round(resultado_cluster_1$valor_neto, 2))
+    })
+    
+    output$valor_neto_cluster_2 <- renderText({
+      paste("El Valor Neto Ajustado para el Cluster 2 es: $", round(resultado_cluster_2$valor_neto, 2))
+    })
+    
+    # Mostrar el ingreso esperado para el Cluster 1
+    output$ingreso_esperado_cluster_1 <- renderText({
+      paste("El Ingreso Esperado para el Cluster 1 es: $", round(resultado_cluster_1$ingreso_esperado, 2))
+    })
+    
+    # Mostrar el ingreso esperado para el Cluster 2
+    output$ingreso_esperado_cluster_2 <- renderText({
+      paste("El Ingreso Esperado para el Cluster 2 es: $", round(resultado_cluster_2$ingreso_esperado, 2))
+    })
+    
+    # Gráfico interactivo de Plotly para el Cluster 1
+    output$grafico_cluster_1 <- renderPlotly({
+      plot_ly(
+        x = seq(1, input$anos), 
+        y = resultado_cluster_1$beneficios_desc, 
+        type = "scatter", 
+        mode = "lines+markers", 
+        name = "Beneficios Cluster 1", 
+        line = list(color = '#d6496c', width = 3), 
+        marker = list(size = 8, color = '#d6496c', opacity = 0.7)
+      ) %>%
+        add_trace(
+          y = resultado_cluster_1$costos_desc, 
+          name = "Costos Cluster 1", 
+          line = list(color = '#7c4d6f', width = 3, dash = 'dash'),
+          marker = list(size = 8, color = '#7c4d6f', opacity = 0.7)
+        ) %>%
+        layout(
+          title = "Beneficios y Costos Descontados para Cluster 1",
+          xaxis = list(title = "Años"),
+          yaxis = list(title = "Monto ($)", rangemode = "tozero"),
+          legend = list(x = 0.8, y = 0.1)
+        )
+    })
+    
+    # Gráfico interactivo de Plotly para el Cluster 2
+    output$grafico_cluster_2 <- renderPlotly({
+      plot_ly(
+        x = seq(1, input$anos), 
+        y = resultado_cluster_2$beneficios_desc, 
+        type = "scatter", 
+        mode = "lines+markers", 
+        name = "Beneficios Cluster 2", 
+        line = list(color = '#2ca02c', width = 3),
+        marker = list(size = 8, color = '#2ca02c', opacity = 0.7)
+      ) %>%
+        add_trace(
+          y = resultado_cluster_2$costos_desc, 
+          name = "Costos Cluster 2", 
+          line = list(color = '#4c9a2a', width = 3, dash = 'dash'),
+          marker = list(size = 8, color = '#4c9a2a', opacity = 0.7)
+        ) %>%
+        layout(
+          title = "Beneficios y Costos Descontados para Cluster 2",
+          xaxis = list(title = "Años"),
+          yaxis = list(title = "Monto ($)", rangemode = "tozero"),
+          legend = list(x = 0.8, y = 0.1)
+        )
+    })
+  })
+}
+# Ejecutar la aplicación
+shinyApp(ui = ui, server = server)
+```
+
+
+
